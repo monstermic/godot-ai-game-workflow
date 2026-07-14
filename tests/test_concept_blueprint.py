@@ -570,23 +570,65 @@ class ConceptBlueprintTests(unittest.TestCase):
         )
         self.assertEqual(len(item_paths), 1 + len(final["materialized"]["work_items"]))
 
-    def test_final_validation_rejects_approval_bound_before_blueprint_commit(self) -> None:
+    def test_finalize_rejects_approval_bound_before_blueprint_commit(self) -> None:
         subprocess.run(["git", "init", "-b", "main"], cwd=self.root, check=True, capture_output=True)
         subprocess.run(["git", "config", "user.name", "Test User"], cwd=self.root, check=True)
         subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=self.root, check=True)
         subprocess.run(["git", "add", "-A"], cwd=self.root, check=True)
         subprocess.run(["git", "commit", "-m", "bootstrap"], cwd=self.root, check=True, capture_output=True)
         final_gate = self._advance_to_final_gate()
-        finalize_concept(
+        self.assertEqual(final_gate["gate"], "commit_blueprint_inputs")
+        stale_request = {
+            "scope_hash": "0" * 64,
+            "commit_sha": subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=self.root,
+                text=True,
+                capture_output=True,
+                check=True,
+            ).stdout.strip(),
+            "decision": "approve_complete_game_blueprint",
+        }
+        with self.assertRaisesRegex(WorkflowError, "Commit the canonical blueprint inputs"):
+            finalize_concept(
+                self.root,
+                self._write_approval(stale_request, "APR-0003"),
+                apply=True,
+            )
+        self.assertFalse((self.root / "evidence" / "approvals" / "APR-0003.json").exists())
+
+    def test_human_mode_requires_committed_blueprint_inputs_before_approval(self) -> None:
+        subprocess.run(["git", "init", "-b", "main"], cwd=self.root, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test User"], cwd=self.root, check=True)
+        subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=self.root, check=True)
+        subprocess.run(["git", "add", "-A"], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-m", "bootstrap"], cwd=self.root, check=True, capture_output=True)
+
+        pending = self._advance_to_final_gate()
+        self.assertEqual(pending["status"], "blocked")
+        self.assertEqual(pending["gate"], "commit_blueprint_inputs")
+        self.assertEqual(next_concept_task(self.root)["gate"], "commit_blueprint_inputs")
+
+        subprocess.run(["git", "add", "-A"], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-m", "commit blueprint inputs"], cwd=self.root, check=True, capture_output=True)
+        gate = next_concept_task(self.root)
+        self.assertEqual(gate["status"], "needs_human")
+        self.assertEqual(
+            gate["approval_request"]["commit_sha"],
+            subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=self.root,
+                text=True,
+                capture_output=True,
+                check=True,
+            ).stdout.strip(),
+        )
+        final = finalize_concept(
             self.root,
-            self._write_approval(final_gate["approval_request"], "APR-0003"),
+            self._write_approval(gate["approval_request"], "APR-0003"),
             apply=True,
         )
-        subprocess.run(["git", "add", "-A"], cwd=self.root, check=True)
-        subprocess.run(["git", "commit", "-m", "finalize blueprint"], cwd=self.root, check=True, capture_output=True)
-        report = validate_concept(self.root, require_final=True)
-        self.assertEqual(report["status"], "failed")
-        self.assertTrue(any("commit" in error.casefold() for error in report["errors"]))
+        self.assertEqual(final["status"], "passed")
 
     def test_complete_flow_renders_blueprint_materializes_work_and_resumes(self) -> None:
         final_gate = self._advance_to_final_gate()

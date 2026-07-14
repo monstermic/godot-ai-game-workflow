@@ -486,14 +486,14 @@ def next_concept_task(root: Path | str) -> dict[str, Any]:
                 _blueprint_scope(project),
                 "approve_complete_game_blueprint",
             )
+            if not _blueprint_inputs_are_committed(project):
+                return {
+                    "schema_version": SCHEMA_VERSION,
+                    "status": "blocked",
+                    "gate": "commit_blueprint_inputs",
+                    "message": "Commit the canonical blueprint inputs, then request or create the final approval.",
+                }
             if is_ai_staging(project):
-                if not _blueprint_inputs_are_committed(project):
-                    return {
-                        "schema_version": SCHEMA_VERSION,
-                        "status": "blocked",
-                        "gate": "commit_blueprint_inputs",
-                        "message": "Commit the canonical blueprint inputs, then run aigame concept finalize --apply.",
-                    }
                 return {
                     "schema_version": SCHEMA_VERSION,
                     "status": "passed",
@@ -1024,19 +1024,19 @@ def submit_concept_task(
         state.update({"status": "blueprint_approval", "active_task_id": None})
         state["history"].append({"stage": "quality_audit", "completed_at": _now()})
         request = _approval_request(project, _blueprint_scope(project), "approve_complete_game_blueprint")
+        if not _blueprint_inputs_are_committed(project):
+            state["pending_approval"] = None
+            state["pending_approval_options"] = None
+            _save_state(project, state)
+            _complete_task(project, task)
+            return {
+                "schema_version": SCHEMA_VERSION,
+                "status": "blocked",
+                "gate": "commit_blueprint_inputs",
+                "message": "Commit the canonical blueprint inputs, then request or create the final approval.",
+                "validation": report,
+            }
         if is_ai_staging(project):
-            if not _blueprint_inputs_are_committed(project):
-                state["pending_approval"] = None
-                state["pending_approval_options"] = None
-                _save_state(project, state)
-                _complete_task(project, task)
-                return {
-                    "schema_version": SCHEMA_VERSION,
-                    "status": "blocked",
-                    "gate": "commit_blueprint_inputs",
-                    "message": "Commit the canonical blueprint inputs, then run aigame concept finalize --apply.",
-                    "validation": report,
-                }
             approval = create_agent_approval(project, request)
             _persist_approval(project, approval)
             result = _apply_finalization(project, state, approval, request["scope_hash"])
@@ -1902,6 +1902,8 @@ def finalize_concept(
     report = validate_concept(project, require_final=True)
     if report["status"] != "passed":
         raise WorkflowError("Blueprint Ready validation failed: " + "; ".join(report["errors"]))
+    if not _blueprint_inputs_are_committed(project):
+        raise WorkflowError("Commit the canonical blueprint inputs before final approval")
     request = _approval_request(project, _blueprint_scope(project), "approve_complete_game_blueprint")
     approval = _validate_approval(project, approval_path, request)
     if not apply:

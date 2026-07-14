@@ -46,7 +46,7 @@ Stop at every `needs_human` result. Show the exact pitches, product identity, or
 
 - Direction selection: use the pitch-specific entry in `approval_requests`, then run `aigame concept select PIT-#### --approval <approval-file>` and preview before `--apply`.
 - Product identity: resubmit the product task with `--approval <approval-file>` after the title and identity are approved.
-- Blueprint finalization: run `aigame concept validate --final --json` and `aigame concept render --check --json`, then preview and apply `aigame concept finalize --approval <approval-file>`.
+- Blueprint finalization: when `commit_blueprint_inputs` is returned, commit the canonical concept records and rerun `aigame concept next --json`; then run `aigame concept validate --final --json` and `aigame concept render --check --json`, obtain human approval for that refreshed commit-bound request, and preview and apply `aigame concept finalize --approval <approval-file>`.
 
 Approvals must match the returned `scope_hash`, `commit_sha`, and `decision`. An agent may prepare the record after an explicit response but cannot be its approver.
 
