@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from aigame.cli import main
 from aigame.generator import create_game
@@ -108,6 +109,31 @@ class CommandTests(unittest.TestCase):
             self.assertIn("*.psd filter=lfs", attributes)
             self.assertIn("*.wav filter=lfs", attributes)
             self.assertEqual(result["status"], "passed")
+
+    def test_new_command_sets_a_repository_local_identity_when_git_has_none(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "identity-game"
+            isolated_global = Path(temporary) / "missing-global-gitconfig"
+            with patch.dict(
+                os.environ,
+                {
+                    "GIT_CONFIG_GLOBAL": str(isolated_global),
+                    "GIT_CONFIG_NOSYSTEM": "1",
+                },
+            ):
+                code, result = self._run(
+                    [
+                        "new", "Identity Game", "--destination", str(root),
+                        "--godot-version", "4.7", "--apply", "--json",
+                    ]
+                )
+            self.assertEqual(code, 0)
+            self.assertEqual(result["status"], "passed")
+            self.assertEqual(git(root, "config", "--local", "user.name"), "AI Game Workflow")
+            self.assertEqual(
+                git(root, "config", "--local", "user.email"),
+                "aigame@users.noreply.github.com",
+            )
 
     def test_new_remote_repository_is_previewed_without_writes(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

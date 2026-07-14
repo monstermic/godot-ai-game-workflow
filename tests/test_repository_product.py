@@ -60,6 +60,11 @@ class RepositoryLayoutTests(unittest.TestCase):
         text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
         self.assertIn('aigame = "aigame.cli:main"', text)
         self.assertIn('requires-python = ">=3.11"', text)
+        self.assertIn('test = ["PyYAML==6.0.3"]', text)
+        contract = (ROOT / ".github" / "workflows" / "contract.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("python -m pip install -e '.[test]'", contract)
 
     def test_release_candidate_validates_name_and_computes_metadata_after_build(self) -> None:
         text = (ROOT / ".github" / "workflows" / "release-candidate.yml").read_text(encoding="utf-8")
@@ -79,6 +84,13 @@ class RepositoryLayoutTests(unittest.TestCase):
     def test_release_gh_commands_bind_to_the_current_repository(self) -> None:
         text = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
         self.assertIn("GH_REPO: ${{ github.repository }}", text)
+
+    def test_independent_review_preserves_the_documented_solo_owner_policy(self) -> None:
+        text = (ROOT / ".github" / "workflows" / "independent-review.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Solo-owner policy", text)
+        self.assertIn("pull.user.login === repository.data.owner.login", text)
 
 
 class InitializeTests(unittest.TestCase):
@@ -153,8 +165,8 @@ class RepositoryConfigurationTests(unittest.TestCase):
         plan = build_repository_plan("monstermic/godot-ai-game-workflow")
         self.assertEqual(plan["repository"]["visibility"], "public")
         self.assertTrue(plan["repository"]["is_template"])
-        self.assertIn("contract", plan["ruleset"]["required_checks"])
-        self.assertIn("godot-quality", plan["ruleset"]["required_checks"])
+        self.assertIn("contract / contract", plan["ruleset"]["required_checks"])
+        self.assertIn("godot-quality / godot-quality", plan["ruleset"]["required_checks"])
         self.assertEqual(
             plan["project"]["statuses"],
             ["Intake", "Ready", "Active", "Review", "Playtest", "Blocked", "Done"],

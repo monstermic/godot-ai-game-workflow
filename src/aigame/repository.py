@@ -6,7 +6,12 @@ from pathlib import Path
 from typing import Any
 
 
-REQUIRED_CHECKS = ["contract", "godot-quality", "asset-provenance", "independent-review"]
+REQUIRED_CHECKS = [
+    "contract / contract",
+    "godot-quality / godot-quality",
+    "asset-provenance / asset-provenance",
+    "independent-review / independent-review",
+]
 
 
 def build_repository_plan(repository: str) -> dict[str, Any]:
