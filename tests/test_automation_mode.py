@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -14,7 +15,7 @@ from aigame.automation import (
     set_automation_mode,
 )
 from aigame.cli import _doctor, build_parser
-from aigame.concept import next_concept_task, start_concept, submit_concept_task
+from aigame.concept import finalize_concept, next_concept_task, start_concept, submit_concept_task
 from aigame.core import WorkflowError, choose_next, fingerprint
 from aigame.generator import create_game
 from aigame.validation import validate_project
@@ -191,6 +192,38 @@ class AutomationModeTests(unittest.TestCase):
         self.assertEqual(len(approvals), 3)
         self.assertTrue(all(value["approver"] == "aigame-agent" for value in approvals))
         self.assertTrue(all(value["approval_kind"] == "agent" for value in approvals))
+
+    def test_ai_mode_commits_blueprint_inputs_before_final_agent_approval(self) -> None:
+        subprocess.run(["git", "init", "-b", "main"], cwd=self.root, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test Agent"], cwd=self.root, check=True)
+        subprocess.run(["git", "config", "user.email", "agent@example.invalid"], cwd=self.root, check=True)
+        set_automation_mode(
+            self.root,
+            "ai_staging",
+            confirmation=AI_MODE_CONFIRMATION,
+            apply=True,
+        )
+        subprocess.run(["git", "add", "-A"], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-m", "bootstrap"], cwd=self.root, check=True, capture_output=True)
+        start_concept(self.root, prompt="Clockwork roguelite", profiles=["roguelite-v1"], apply=True)
+        submit_concept_task(self.root, "CTK-0001", pitch_result(), apply=True)
+        submit_concept_task(self.root, "CTK-0002", product_identity_result(), apply=True)
+        submit_concept_task(self.root, "CTK-0003", mechanic_result(), apply=True)
+        submit_concept_task(self.root, "CTK-0004", catalog_result(), apply=True)
+        submit_concept_task(self.root, "CTK-0005", game_arc_result(), apply=True)
+        pending = submit_concept_task(self.root, "CTK-0006", audit_result(self.root), apply=True)
+        self.assertEqual(pending["status"], "blocked")
+        self.assertEqual(pending["gate"], "commit_blueprint_inputs")
+        subprocess.run(["git", "add", "-A"], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-m", "approve blueprint inputs"], cwd=self.root, check=True, capture_output=True)
+        gate = next_concept_task(self.root)
+        self.assertEqual(gate["status"], "passed")
+        self.assertEqual(gate["gate"], "agent_finalize")
+        finalized = finalize_concept(self.root, None, apply=True)
+        self.assertEqual(finalized["status"], "passed")
+        subprocess.run(["git", "add", "-A"], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-m", "finalize blueprint"], cwd=self.root, check=True, capture_output=True)
+        self.assertEqual(validate_project(self.root)["status"], "passed")
 
     def test_staging_merge_requires_exact_authenticated_owner_comment(self) -> None:
         set_automation_mode(

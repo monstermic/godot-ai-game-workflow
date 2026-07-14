@@ -257,6 +257,89 @@ def _approval_request(project: Path, scope_hash: str, decision: str) -> dict[str
     return {"scope_hash": scope_hash, "commit_sha": _commit_sha(project), "decision": decision}
 
 
+def _approval_commit_errors(
+    project: Path,
+    approval: dict[str, Any],
+    *,
+    input_paths: Iterable[Path] = (),
+) -> list[str]:
+    repository = subprocess.run(
+        ["git", "rev-parse", "--is-inside-work-tree"],
+        cwd=project,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if repository.returncode != 0:
+        return [] if approval.get("commit_sha") == "UNCOMMITTED" else ["approval commit cannot be verified outside Git"]
+    commit_sha = str(approval.get("commit_sha") or "")
+    if not re.fullmatch(r"[0-9a-f]{40}", commit_sha):
+        return ["approval commit is not a committed Git SHA"]
+    exists = subprocess.run(
+        ["git", "cat-file", "-e", f"{commit_sha}^{{commit}}"],
+        cwd=project,
+        capture_output=True,
+        check=False,
+    )
+    if exists.returncode != 0:
+        return ["approval commit does not exist in this repository"]
+    ancestor = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", commit_sha, "HEAD"],
+        cwd=project,
+        capture_output=True,
+        check=False,
+    )
+    if ancestor.returncode != 0:
+        return ["approval commit is not an ancestor of the current commit"]
+    relative_paths = [str(path.relative_to(project)).replace("\\", "/") for path in input_paths]
+    if relative_paths:
+        comparison = subprocess.run(
+            ["git", "diff", "--quiet", commit_sha, "--", *relative_paths],
+            cwd=project,
+            capture_output=True,
+            check=False,
+        )
+        if comparison.returncode == 1:
+            return ["approval commit does not contain the current approved inputs"]
+        if comparison.returncode != 0:
+            return ["approval commit inputs could not be verified"]
+    return []
+
+
+def _blueprint_input_paths(project: Path) -> list[Path]:
+    task_folder = project / "work" / "concept" / "tasks"
+    return [
+        path
+        for path in sorted((project / "work" / "concept").rglob("*.json"))
+        if task_folder not in path.parents
+    ]
+
+
+def _blueprint_inputs_are_committed(project: Path) -> bool:
+    repository = subprocess.run(
+        ["git", "rev-parse", "--is-inside-work-tree"],
+        cwd=project,
+        capture_output=True,
+        check=False,
+    )
+    if repository.returncode != 0:
+        return True
+    relative_paths = [
+        str(path.relative_to(project)).replace("\\", "/")
+        for path in _blueprint_input_paths(project)
+    ]
+    status = subprocess.run(
+        ["git", "status", "--porcelain=v1", "--untracked-files=all", "--", *relative_paths],
+        cwd=project,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if status.returncode != 0:
+        raise WorkflowError("Could not verify whether blueprint inputs are committed")
+    return not status.stdout.strip()
+
+
 def _validate_approval(
     project: Path,
     approval_path: Path | str | None,
@@ -383,14 +466,49 @@ def next_concept_task(root: Path | str) -> dict[str, Any]:
     if state.get("status") == "finalized":
         return {"schema_version": SCHEMA_VERSION, "status": "finalized", "concept_task": None}
     if state.get("status") in {"direction_selection", "blueprint_approval"}:
+        approval_request = state.get("pending_approval")
+        approval_requests = state.get("pending_approval_options")
+        if state.get("status") == "direction_selection":
+            records = _concept_records(project)
+            approval_requests = {
+                pitch["id"]: _approval_request(
+                    project,
+                    _pitch_scope(records["pitches"], records["intakes"][0], str(pitch["id"])),
+                    f"select_concept_direction:{pitch['id']}",
+                )
+                for pitch in records["pitches"]
+            }
+            selected_id = str(state.get("selected_pitch_id") or "")
+            approval_request = approval_requests.get(selected_id) or state.get("pending_approval")
+        elif state.get("status") == "blueprint_approval":
+            approval_request = _approval_request(
+                project,
+                _blueprint_scope(project),
+                "approve_complete_game_blueprint",
+            )
+            if is_ai_staging(project):
+                if not _blueprint_inputs_are_committed(project):
+                    return {
+                        "schema_version": SCHEMA_VERSION,
+                        "status": "blocked",
+                        "gate": "commit_blueprint_inputs",
+                        "message": "Commit the canonical blueprint inputs, then run aigame concept finalize --apply.",
+                    }
+                return {
+                    "schema_version": SCHEMA_VERSION,
+                    "status": "passed",
+                    "gate": "agent_finalize",
+                    "approval_request": approval_request,
+                    "next_action": "aigame concept finalize --apply --json",
+                }
         result = {
             "schema_version": SCHEMA_VERSION,
             "status": "needs_human",
             "gate": state.get("status"),
-            "approval_request": state.get("pending_approval"),
+            "approval_request": approval_request,
         }
-        if state.get("pending_approval_options"):
-            result["approval_requests"] = state["pending_approval_options"]
+        if approval_requests:
+            result["approval_requests"] = approval_requests
         return result
     task_id = state.get("active_task_id")
     if not task_id:
@@ -587,7 +705,6 @@ def _blueprint_scope(project: Path) -> str:
 
 
 def _next_stage(project: Path, state: dict[str, Any], task: dict[str, Any], stage: str) -> dict[str, Any]:
-    _complete_task(project, task)
     state["history"].append({"stage": task["stage"], "completed_at": _now()})
     state["status"] = stage
     return _create_task(project, state, stage)
@@ -674,7 +791,6 @@ def submit_concept_task(
             }
         _write_json(project / "work" / "concept" / "CIN-0001.json", intake)
         _replace_many(project, "", "PIT", pitches)
-        _complete_task(project, task)
         if is_ai_staging(project):
             approval = create_agent_approval(project, request)
             _persist_approval(project, approval)
@@ -709,6 +825,7 @@ def submit_concept_task(
             )
             next_task = _create_task(project, state, "product_identity")
             _save_state(project, state)
+            _complete_task(project, task)
             return {
                 "schema_version": SCHEMA_VERSION,
                 "status": "passed",
@@ -726,6 +843,7 @@ def submit_concept_task(
         )
         state["history"].append({"stage": "pitching", "completed_at": _now()})
         _save_state(project, state)
+        _complete_task(project, task)
         return {
             "schema_version": SCHEMA_VERSION,
             "status": "needs_human",
@@ -775,6 +893,7 @@ def submit_concept_task(
         state["pending_approval_options"] = None
         next_task = _next_stage(project, state, task, "mechanics")
         _save_state(project, state)
+        _complete_task(project, task)
         return {"schema_version": SCHEMA_VERSION, "status": "passed", "concept_task": next_task}
 
     if stage == "mechanics":
@@ -795,6 +914,7 @@ def submit_concept_task(
         _replace_many(project, "mechanics", "MEC", mechanics)
         next_task = _next_stage(project, state, task, "content_catalog")
         _save_state(project, state)
+        _complete_task(project, task)
         return {"schema_version": SCHEMA_VERSION, "status": "passed", "concept_task": next_task}
 
     if stage == "content_catalog":
@@ -838,6 +958,7 @@ def submit_concept_task(
         _write_singleton(project, "NAM", registry)
         next_task = _next_stage(project, state, task, "complete_game_arc")
         _save_state(project, state)
+        _complete_task(project, task)
         return {"schema_version": SCHEMA_VERSION, "status": "passed", "concept_task": next_task}
 
     if stage == "complete_game_arc":
@@ -862,6 +983,7 @@ def submit_concept_task(
         _write_singleton(project, "BLU", blueprint)
         next_task = _next_stage(project, state, task, "quality_audit")
         _save_state(project, state)
+        _complete_task(project, task)
         return {"schema_version": SCHEMA_VERSION, "status": "passed", "concept_task": next_task}
 
     if stage == "quality_audit":
@@ -899,19 +1021,32 @@ def submit_concept_task(
             for path, content in prior_records.items():
                 path.write_text(content, encoding="utf-8", newline="\n")
             raise WorkflowError("Concept audit failed: " + "; ".join(report["errors"]))
-        _complete_task(project, task)
         state.update({"status": "blueprint_approval", "active_task_id": None})
         state["history"].append({"stage": "quality_audit", "completed_at": _now()})
         request = _approval_request(project, _blueprint_scope(project), "approve_complete_game_blueprint")
         if is_ai_staging(project):
+            if not _blueprint_inputs_are_committed(project):
+                state["pending_approval"] = None
+                state["pending_approval_options"] = None
+                _save_state(project, state)
+                _complete_task(project, task)
+                return {
+                    "schema_version": SCHEMA_VERSION,
+                    "status": "blocked",
+                    "gate": "commit_blueprint_inputs",
+                    "message": "Commit the canonical blueprint inputs, then run aigame concept finalize --apply.",
+                    "validation": report,
+                }
             approval = create_agent_approval(project, request)
             _persist_approval(project, approval)
             result = _apply_finalization(project, state, approval, request["scope_hash"])
+            _complete_task(project, task)
             result["validation"] = report
             return result
         state["pending_approval"] = request
         state["pending_approval_options"] = None
         _save_state(project, state)
+        _complete_task(project, task)
         return {"schema_version": SCHEMA_VERSION, "status": "needs_human", "approval_request": request, "validation": report}
 
     raise WorkflowError(f"Unsupported concept task stage: {stage}")
@@ -1174,6 +1309,10 @@ def validate_concept(root: Path | str, *, require_final: bool = False) -> dict[s
         )
         if approval.get("status") != "approved" or approval.get("scope_hash") != expected_scope:
             errors.append("Current direction approval scope does not match the approved direction inputs")
+        errors.extend(
+            f"Current direction {message}"
+            for message in _approval_commit_errors(project, approval)
+        )
     if state.get("product_identity_approval_id") not in approval_ids:
         errors.append("Current product identity approval is missing")
     elif records["products"]:
@@ -1181,6 +1320,10 @@ def validate_concept(root: Path | str, *, require_final: bool = False) -> dict[s
         expected_scope = _product_scope(records["products"][0])
         if approval.get("status") != "approved" or approval.get("scope_hash") != expected_scope:
             errors.append("Current product identity approval scope does not match the approved identity")
+        errors.extend(
+            f"Current product identity {message}"
+            for message in _approval_commit_errors(project, approval)
+        )
     if state.get("status") == "finalized":
         if state.get("blueprint_approval_id") not in approval_ids:
             errors.append("Current blueprint approval is missing")
@@ -1189,6 +1332,14 @@ def validate_concept(root: Path | str, *, require_final: bool = False) -> dict[s
             expected_scope = _blueprint_scope(project)
             if approval.get("status") != "approved" or approval.get("scope_hash") != expected_scope:
                 errors.append("Current blueprint approval scope does not match the current blueprint inputs")
+            errors.extend(
+                f"Current blueprint {message}"
+                for message in _approval_commit_errors(
+                    project,
+                    approval,
+                    input_paths=_blueprint_input_paths(project),
+                )
+            )
     return {
         "schema_version": SCHEMA_VERSION,
         "status": "failed" if errors else "passed",
@@ -1553,7 +1704,20 @@ def _next_numeric_id(folder: Path, prefix: str) -> int:
     return max(values, default=0) + 1
 
 
+def _clear_partial_materialization(project: Path, scope_hash: str) -> None:
+    for folder, pattern in (
+        (project / "work" / "requirements", "REQ-*.json"),
+        (project / "work" / "items", "WI-*.json"),
+        (project / "evidence" / "records", "EVD-*.json"),
+    ):
+        for path in folder.glob(pattern):
+            record = _load_json(path)
+            if record.get("materialization_key") == scope_hash:
+                path.unlink()
+
+
 def _materialize_work(project: Path, scope_hash: str) -> dict[str, Any]:
+    _clear_partial_materialization(project, scope_hash)
     records = _concept_records(project)
     requirements_dir = project / "work" / "requirements"
     items_dir = project / "work" / "items"
@@ -1576,6 +1740,7 @@ def _materialize_work(project: Path, scope_hash: str) -> dict[str, Any]:
                 "playtest_hypotheses": list(scope.get("playtest_hypotheses", [])),
                 "non_goals": ["Unapproved scope expansion."],
                 "concept_refs": [scope["id"]],
+                "materialization_key": scope_hash,
             },
             record_id=req_id,
             status="approved",
@@ -1614,6 +1779,7 @@ def _materialize_work(project: Path, scope_hash: str) -> dict[str, Any]:
                 "non_goals": ["Treating an optional or not-applicable quality item as release blocking."],
                 "quality_profile_ref": f"{profile_id}/{item_id}",
                 "concept_refs": [records["quality"][0]["id"], *assessment.get("scope_refs", [])],
+                "materialization_key": scope_hash,
             },
             record_id=req_id,
             status="approved",
@@ -1655,6 +1821,7 @@ def _materialize_work(project: Path, scope_hash: str) -> dict[str, Any]:
                 "playtest_required": bool(scope.get("playtest_hypotheses")),
                 "definition_of_done": [f"{scope_id} is implemented and current evidence satisfies {requirement_map[scope_id]}."],
                 "concept_refs": [scope_id, records["blueprints"][0]["id"], records["dod"][0]["id"]],
+                "materialization_key": scope_hash,
             },
             record_id=work_id,
             status="ready",
@@ -1685,6 +1852,7 @@ def _materialize_work(project: Path, scope_hash: str) -> dict[str, Any]:
                 "playtest_required": False,
                 "definition_of_done": ["Create schema-valid work items for this milestone without detailing later milestones."],
                 "concept_refs": [records["roadmaps"][0]["id"]],
+                "materialization_key": scope_hash,
             },
             record_id=work_id,
             status="ready",
@@ -1703,6 +1871,7 @@ def _materialize_work(project: Path, scope_hash: str) -> dict[str, Any]:
                 "work_item_id": "WI-0001",
                 "requirement_ids": ["REQ-0001"],
                 "artifact_sha256": scope_hash,
+                "materialization_key": scope_hash,
             },
             record_id=f"EVD-{_next_numeric_id(project / 'evidence' / 'records', 'EVD'):04d}",
             status="current",
@@ -1759,7 +1928,6 @@ def _apply_finalization(
         }
     )
     state["history"].append({"stage": "blueprint_approval", "completed_at": _now()})
-    _save_state(project, state)
     config_path = project / ".aigame" / "project.toml"
     config = config_path.read_text(encoding="utf-8")
     config = re.sub(
@@ -1770,6 +1938,7 @@ def _apply_finalization(
     )
     config = re.sub(r'^current_milestone = "[^"]+"$', 'current_milestone = "experiment"', config, flags=re.MULTILINE)
     config_path.write_text(config, encoding="utf-8", newline="\n")
+    _save_state(project, state)
     return {
         "schema_version": SCHEMA_VERSION,
         "status": "passed",

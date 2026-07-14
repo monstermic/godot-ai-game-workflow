@@ -184,7 +184,8 @@ Read `.aigame/automation.json` before making any approval or integration decisio
 When concept work has not started, run `aigame concept start --prompt-file <file> --apply`, then
 repeat `aigame concept next --json` and schema-valid `aigame concept submit` operations.
 In `human_gated` mode stop for direction, product identity, and blueprint approval. In
-`ai_staging` mode make those decisions, retain the generated agent approvals, and continue.
+`ai_staging` mode make those decisions, retain the generated agent approvals, and continue. At
+`commit_blueprint_inputs`, commit the canonical concept records before running concept finalization.
 Do not write implementation code until concept state is `finalized`.
 Never push directly to `main`, approve your own independent review, or publish a release.
 Before changing files, claim exactly one work item with `aigame claim WI-#### --apply`.
@@ -466,7 +467,8 @@ description: Turn a user game prompt into the complete portable aigame blueprint
 Read the generated `AGENTS.md` and `.aigame/automation.json`. Drive concept work through the
 pinned vendored workflow and produce one schema-valid result at a time. In `human_gated` mode,
 stop at every approval and use the selected pitch's exact request. In `ai_staging` mode, make the
-creative decisions, accept the CLI-generated agent approvals, and continue automatically.
+creative decisions and accept CLI-generated agent approvals. At `commit_blueprint_inputs`, commit
+the canonical concept records, run `aigame concept next --json`, then run concept finalization.
 After finalization, complete one work item and target `staging`. Run `aigame staging merge` to obtain
 the exact approval comment, then stop for the authenticated repository owner to post it. The agent
 must not post that comment. Independent review remains mandatory.

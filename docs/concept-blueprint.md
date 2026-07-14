@@ -29,7 +29,7 @@ aigame concept submit CTK-0001 --result pitch-result.json --apply --json
 
 In `human_gated` mode, when a command returns `needs_human`, its `approval_request` identifies the exact `scope_hash`, `commit_sha`, and `decision`. Pitching also returns `approval_requests` keyed by pitch ID; use the request for the direction the human actually selects. After the human explicitly decides, record an `APR-` document matching that request and use it with `concept select`, the product identity submission, or `concept finalize`.
 
-In `ai_staging` mode, the pitching submission selects the recommended direction, product identity submission records its agent approval, and a valid quality audit records the blueprint approval and finalizes automatically. These are checksum-bound `APR-` records and remain invalidated by later input changes; no external approval file is required for those three creative decisions.
+In `ai_staging` mode, the pitching submission selects the recommended direction and product identity submission records its agent approval. After a valid quality audit, a Git-backed project returns `commit_blueprint_inputs`: the agent commits the canonical concept records, refreshes the request with `aigame concept next --json`, and runs `aigame concept finalize --apply --json`. The CLI then records the commit-bound blueprint approval without an external approval file. Non-Git fixtures finalize directly. These checksum-bound `APR-` records remain invalidated by later input changes.
 
 ## Canonical outputs
 

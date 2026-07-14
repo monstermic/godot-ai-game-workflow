@@ -3,9 +3,11 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from aigame.cli import main
 from aigame.concept import (
@@ -536,6 +538,55 @@ class ConceptBlueprintTests(unittest.TestCase):
         task = next_concept_task(self.root)["concept_task"]
         self.assertEqual(task["id"], "CTK-0006")
         self.assertEqual(task["status"], "ready")
+
+    def test_interrupted_transition_keeps_the_active_task_retryable(self) -> None:
+        self._advance_to_arc_task()
+        with mock.patch("aigame.concept._save_state", side_effect=RuntimeError("interrupted")):
+            with self.assertRaisesRegex(RuntimeError, "interrupted"):
+                submit_concept_task(self.root, "CTK-0005", game_arc_result(), apply=True)
+        resumed = next_concept_task(self.root)["concept_task"]
+        self.assertEqual(resumed["id"], "CTK-0005")
+        self.assertEqual(resumed["status"], "ready")
+        completed = submit_concept_task(
+            self.root,
+            "CTK-0005",
+            game_arc_result(),
+            apply=True,
+        )
+        self.assertEqual(completed["concept_task"]["id"], "CTK-0006")
+
+    def test_interrupted_finalization_rebuilds_without_duplicate_work(self) -> None:
+        final_gate = self._advance_to_final_gate()
+        approval_path = self._write_approval(final_gate["approval_request"], "APR-0003")
+        with mock.patch("aigame.concept._save_state", side_effect=RuntimeError("interrupted")):
+            with self.assertRaisesRegex(RuntimeError, "interrupted"):
+                finalize_concept(self.root, approval_path, apply=True)
+        final = finalize_concept(self.root, approval_path, apply=True)
+        requirement_paths = list((self.root / "work" / "requirements").glob("REQ-*.json"))
+        item_paths = list((self.root / "work" / "items").glob("WI-*.json"))
+        self.assertEqual(
+            len(requirement_paths),
+            1 + len(final["materialized"]["requirements"]),
+        )
+        self.assertEqual(len(item_paths), 1 + len(final["materialized"]["work_items"]))
+
+    def test_final_validation_rejects_approval_bound_before_blueprint_commit(self) -> None:
+        subprocess.run(["git", "init", "-b", "main"], cwd=self.root, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test User"], cwd=self.root, check=True)
+        subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=self.root, check=True)
+        subprocess.run(["git", "add", "-A"], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-m", "bootstrap"], cwd=self.root, check=True, capture_output=True)
+        final_gate = self._advance_to_final_gate()
+        finalize_concept(
+            self.root,
+            self._write_approval(final_gate["approval_request"], "APR-0003"),
+            apply=True,
+        )
+        subprocess.run(["git", "add", "-A"], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-m", "finalize blueprint"], cwd=self.root, check=True, capture_output=True)
+        report = validate_concept(self.root, require_final=True)
+        self.assertEqual(report["status"], "failed")
+        self.assertTrue(any("commit" in error.casefold() for error in report["errors"]))
 
     def test_complete_flow_renders_blueprint_materializes_work_and_resumes(self) -> None:
         final_gate = self._advance_to_final_gate()

@@ -170,7 +170,8 @@ description: Build or resume the complete portable game blueprint before impleme
 
 Read `AGENTS.md` and `.aigame/automation.json`. Complete one schema-valid `aigame concept`
 task at a time. Human-gated mode stops for approval; AI-staging mode records agent decisions
-and continues. Only the authenticated owner may post the staging approval comment. Never bypass
+and continues. Commit canonical concept records at `commit_blueprint_inputs` before finalization.
+Only the authenticated owner may post the staging approval comment. Never bypass
 independent review, production, release, or rollback.
 """,
         )
