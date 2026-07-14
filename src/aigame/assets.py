@@ -35,7 +35,7 @@ def generate_asset(
     brief: dict[str, Any], adapter: Sequence[str] | None
 ) -> dict[str, Any]:
     _validate_contract(brief, "asset-brief.schema.json", "AssetBrief")
-    if not adapter:
+    def placeholder(reason: str | None = None) -> dict[str, Any]:
         result = {
             "schema_version": "1.0",
             "status": "placeholder",
@@ -49,20 +49,27 @@ def generate_asset(
                 "brief_sha256": fingerprint(brief),
             },
         }
+        if reason:
+            result["provenance"]["adapter_failure"] = reason
         _validate_contract(
             result, "asset-generation-result.schema.json", "AssetGenerationResult"
         )
         return result
-    completed = subprocess.run(
-        list(adapter),
-        input=json.dumps(brief),
-        text=True,
-        capture_output=True,
-        check=False,
-        timeout=300,
-    )
+    if not adapter:
+        return placeholder()
+    try:
+        completed = subprocess.run(
+            list(adapter),
+            input=json.dumps(brief),
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=300,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return placeholder(str(error))
     if completed.returncode != 0:
-        raise RuntimeError(completed.stderr.strip() or "Asset adapter failed")
+        return placeholder(completed.stderr.strip() or "Asset adapter failed")
     try:
         result = json.loads(completed.stdout)
     except json.JSONDecodeError as error:
@@ -80,7 +87,15 @@ def generate_asset(
 
 def build_lfs_plan(root: Path | str) -> dict[str, Any]:
     project = Path(root)
-    patterns = ["*.psd", "*.kra", "*.blend", "*.fbx", "*.wav", "*.flac", "*.mp4"]
+    patterns = [
+        "assets/source/**/*.psd",
+        "assets/source/**/*.kra",
+        "assets/source/**/*.blend",
+        "assets/source/**/*.fbx",
+        "assets/source/**/*.wav",
+        "assets/source/**/*.flac",
+        "assets/source/**/*.mp4",
+    ]
     return {
         "schema_version": "1.0",
         "status": "dry_run",

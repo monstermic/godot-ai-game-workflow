@@ -29,11 +29,20 @@ def build_context(root: Path | str, work_item_id: str) -> dict[str, Any]:
         if len(matches) > 1:
             raise RuntimeError(f"Duplicate concept record path for {concept_id}")
         concept_records.append(_load(matches[0]))
+    media_records = []
+    media_spec_folder = project / "work" / "assets" / "specs"
+    if media_spec_folder.is_dir():
+        concept_refs = set(item.get("concept_refs", []))
+        for path in sorted(media_spec_folder.glob("ASP-*.json")):
+            spec = _load(path)
+            if any(str(source).split(".", 1)[0] in concept_refs for source in spec.get("source_refs", [])):
+                media_records.append(spec)
     return {
         "schema_version": "1.0",
         "status": "passed",
         "work_item": item,
         "requirements": requirements,
         "concept_records": concept_records,
+        "media_records": media_records,
         "documents": documents,
     }

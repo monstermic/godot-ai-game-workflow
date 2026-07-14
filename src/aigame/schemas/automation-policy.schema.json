@@ -23,16 +23,19 @@
     "auto_merge_staging": {"type": "boolean"},
     "protected_gates": {
       "type": "array",
-      "items": {"enum": ["independent_review", "staging_owner_approval", "production", "release", "rollback"]},
-      "minItems": 5,
-      "maxItems": 5,
+      "items": {"enum": ["independent_review", "staging_owner_approval", "production", "release", "rollback", "dependencies", "paid_providers", "model_downloads"]},
+      "minItems": 8,
+      "maxItems": 8,
       "uniqueItems": true,
       "allOf": [
         {"contains": {"const": "independent_review"}},
         {"contains": {"const": "staging_owner_approval"}},
         {"contains": {"const": "production"}},
         {"contains": {"const": "release"}},
-        {"contains": {"const": "rollback"}}
+        {"contains": {"const": "rollback"}},
+        {"contains": {"const": "dependencies"}},
+        {"contains": {"const": "paid_providers"}},
+        {"contains": {"const": "model_downloads"}}
       ]
     }
   },

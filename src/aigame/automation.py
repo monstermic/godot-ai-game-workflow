@@ -21,6 +21,9 @@ PROTECTED_GATES = [
     "production",
     "release",
     "rollback",
+    "dependencies",
+    "paid_providers",
+    "model_downloads",
 ]
 AUTO_APPROVED_OPERATIONS = [
     "creative_decisions",

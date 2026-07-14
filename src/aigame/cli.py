@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import shutil
@@ -44,6 +45,16 @@ from .repository import configure_game_repository, configure_repository
 from .state import checkpoint, claim_work_item
 from .upgrade import upgrade_workflow
 from .validation import validate_project
+from .media import (
+    benchmark_assets,
+    compose_recipe,
+    generate_assets,
+    integrate_assets,
+    next_asset_task,
+    plan_assets,
+    sample_assets,
+    validate_assets,
+)
 
 
 def _doctor(project: Path | str | None = None) -> dict[str, Any]:
@@ -64,8 +75,13 @@ def _doctor(project: Path | str | None = None) -> dict[str, Any]:
             "github": shutil.which("gh") is not None,
             "godot": any(shutil.which(name) for name in ("godot", "godot4", "godot.cmd")),
             "browser": False,
-            "image_generation": False,
-            "audio_generation": False,
+            "image_generation": importlib.util.find_spec("PIL") is not None,
+            "audio_generation": importlib.util.find_spec("numpy") is not None,
+            "pixel_media": (
+                importlib.util.find_spec("PIL") is not None
+                and importlib.util.find_spec("numpy") is not None
+            ),
+            "aseprite": shutil.which("aseprite") is not None,
             "network": os.environ.get("AIGAME_OFFLINE", "0") != "1",
             "human_approval": True,
         },
@@ -240,6 +256,57 @@ def build_parser() -> argparse.ArgumentParser:
     concept_revise.add_argument("--apply", action="store_true")
     concept_revise.add_argument("--json", action="store_true", dest="as_json")
 
+    assets = subparsers.add_parser(
+        "assets", help="Plan, generate, validate, and integrate deterministic game media"
+    )
+    assets_sub = assets.add_subparsers(dest="assets_command", required=True)
+
+    assets_plan = assets_sub.add_parser("plan", help="Derive exhaustive media inventory from the blueprint")
+    assets_plan_mode = assets_plan.add_mutually_exclusive_group()
+    assets_plan_mode.add_argument("--check", action="store_true")
+    assets_plan_mode.add_argument("--apply", action="store_true")
+    assets_plan.add_argument("--project", type=Path, default=Path.cwd())
+    assets_plan.add_argument("--json", action="store_true", dest="as_json")
+
+    assets_next = assets_sub.add_parser("next", help="Return the next deterministic media operation")
+    assets_next.add_argument("--project", type=Path, default=Path.cwd())
+    assets_next.add_argument("--json", action="store_true", dest="as_json")
+
+    assets_sample = assets_sub.add_parser("sample", help="Compile and approve representative style samples")
+    assets_sample.add_argument("--approval", type=Path)
+    assets_sample.add_argument("--project", type=Path, default=Path.cwd())
+    assets_sample.add_argument("--apply", action="store_true")
+    assets_sample.add_argument("--json", action="store_true", dest="as_json")
+
+    assets_generate = assets_sub.add_parser("generate", help="Generate one specification or the complete batch")
+    assets_generate.add_argument("asset_spec_id", nargs="?")
+    assets_generate.add_argument("--all", action="store_true", dest="all_assets")
+    assets_generate.add_argument("--jobs", type=int, default=1)
+    assets_generate.add_argument("--project", type=Path, default=Path.cwd())
+    assets_generate.add_argument("--apply", action="store_true")
+    assets_generate.add_argument("--json", action="store_true", dest="as_json")
+
+    assets_compose = assets_sub.add_parser("compose", help="Compile a recipe in memory and return output hashes")
+    assets_compose.add_argument("--recipe", required=True)
+    assets_compose.add_argument("--seed", type=int, required=True)
+    assets_compose.add_argument("--project", type=Path, default=Path.cwd())
+    assets_compose.add_argument("--json", action="store_true", dest="as_json")
+
+    assets_validate = assets_sub.add_parser("validate", help="Validate media contracts, coverage, artifacts, and provenance")
+    assets_validate.add_argument("--project", type=Path, default=Path.cwd())
+    assets_validate.add_argument("--json", action="store_true", dest="as_json")
+
+    assets_benchmark = assets_sub.add_parser("benchmark", help="Measure the CPU-only media performance gates")
+    assets_benchmark.add_argument("--sprite-count", type=int, default=500)
+    assets_benchmark.add_argument("--sound-count", type=int, default=500)
+    assets_benchmark.add_argument("--project", type=Path, default=Path.cwd())
+    assets_benchmark.add_argument("--json", action="store_true", dest="as_json")
+
+    assets_integrate = assets_sub.add_parser("integrate", help="Write the validated Godot media registry")
+    assets_integrate.add_argument("--project", type=Path, default=Path.cwd())
+    assets_integrate.add_argument("--apply", action="store_true")
+    assets_integrate.add_argument("--json", action="store_true", dest="as_json")
+
     mode = subparsers.add_parser("mode", help="Inspect or change the project automation mode")
     mode_sub = mode.add_subparsers(dest="mode_command", required=True)
     mode_show = mode_sub.add_parser("show", help="Show the current automation policy")
@@ -377,24 +444,28 @@ def main(argv: list[str] | None = None) -> int:
             if concept_payload.get("status") != "finalized":
                 payload = concept_payload
             else:
-                capabilities = {
-                    name
-                    for name, enabled in _doctor(args.project)["capabilities"].items()
-                    if enabled
-                }
-                items = [
-                    json.loads(path.read_text(encoding="utf-8"))
-                    for path in sorted((args.project / "work" / "items").glob("WI-*.json"))
-                ]
-                payload = {
-                    "schema_version": "1.0",
-                    "status": "passed",
-                    "work_item": choose_next(
-                        items,
-                        capabilities,
-                        allow_red_unknowns=is_ai_staging(args.project),
-                    ),
-                }
+                media_payload = next_asset_task(args.project)
+                if media_payload.get("operation") != "complete":
+                    payload = {**media_payload, "gate": "pixel_media"}
+                else:
+                    capabilities = {
+                        name
+                        for name, enabled in _doctor(args.project)["capabilities"].items()
+                        if enabled
+                    }
+                    items = [
+                        json.loads(path.read_text(encoding="utf-8"))
+                        for path in sorted((args.project / "work" / "items").glob("WI-*.json"))
+                    ]
+                    payload = {
+                        "schema_version": "1.0",
+                        "status": "passed",
+                        "work_item": choose_next(
+                            items,
+                            capabilities,
+                            allow_red_unknowns=is_ai_staging(args.project),
+                        ),
+                    }
         elif args.command == "context":
             payload = build_context(args.project, args.work_item_id)
         elif args.command == "claim":
@@ -464,6 +535,39 @@ def main(argv: list[str] | None = None) -> int:
             payload = finalize_concept(args.project, args.approval, apply=args.apply)
         elif args.command == "concept" and args.concept_command == "revise":
             payload = revise_concept(args.project, args.change_file, apply=args.apply)
+        elif args.command == "assets" and args.assets_command == "plan":
+            payload = plan_assets(args.project, apply=args.apply)
+            if args.check and payload.get("status") == "dry_run":
+                current = validate_assets(args.project)
+                payload = current if current.get("counts", {}).get("asset_specs") else payload
+        elif args.command == "assets" and args.assets_command == "next":
+            payload = next_asset_task(args.project)
+        elif args.command == "assets" and args.assets_command == "sample":
+            payload = sample_assets(
+                args.project,
+                approval_path=args.approval,
+                apply=args.apply,
+            )
+        elif args.command == "assets" and args.assets_command == "generate":
+            payload = generate_assets(
+                args.project,
+                args.asset_spec_id,
+                all_assets=args.all_assets,
+                jobs=args.jobs,
+                apply=args.apply,
+            )
+        elif args.command == "assets" and args.assets_command == "compose":
+            payload = compose_recipe(args.project, args.recipe, seed=args.seed)
+        elif args.command == "assets" and args.assets_command == "validate":
+            payload = validate_assets(args.project)
+        elif args.command == "assets" and args.assets_command == "benchmark":
+            payload = benchmark_assets(
+                args.project,
+                sprite_count=args.sprite_count,
+                sound_count=args.sound_count,
+            )
+        elif args.command == "assets" and args.assets_command == "integrate":
+            payload = integrate_assets(args.project, apply=args.apply)
         elif args.command == "mode" and args.mode_command == "show":
             payload = {
                 "schema_version": "1.0",

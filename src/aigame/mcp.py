@@ -18,6 +18,16 @@ from .concept import next_concept_task, validate_concept
 from .context import build_context
 from .core import choose_next
 from .validation import validate_project
+from .media import (
+    benchmark_assets,
+    compose_recipe,
+    generate_assets,
+    integrate_assets,
+    next_asset_task,
+    plan_assets,
+    sample_assets,
+    validate_assets,
+)
 
 
 PROTOCOL_VERSION = "2025-06-18"
@@ -103,6 +113,81 @@ TOOLS = [
             "required": ["pull_request"],
         },
     },
+    {
+        "name": "aigame_assets_plan",
+        "title": "Plan complete game media",
+        "description": "Derive the exhaustive visual and audio inventory from the finalized blueprint.",
+        "inputSchema": {"type": "object", "properties": {"apply": {"type": "boolean", "default": False}}},
+    },
+    {
+        "name": "aigame_assets_next",
+        "title": "Return next media operation",
+        "description": "Return the deterministic media state and next valid operation.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "aigame_assets_sample",
+        "title": "Generate representative media samples",
+        "description": "Compile the style sample and apply human or AI-staging approval policy.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "approval_path": {"type": "string"},
+                "apply": {"type": "boolean", "default": False},
+            },
+        },
+    },
+    {
+        "name": "aigame_assets_generate",
+        "title": "Generate deterministic media",
+        "description": "Generate one asset specification or the complete resumable batch.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "asset_spec_id": {"type": "string", "pattern": "^ASP-[0-9]{4}$"},
+                "all": {"type": "boolean", "default": False},
+                "jobs": {"type": "integer", "minimum": 1, "maximum": 64, "default": 1},
+                "apply": {"type": "boolean", "default": False},
+            },
+        },
+    },
+    {
+        "name": "aigame_assets_compose",
+        "title": "Compose media recipe",
+        "description": "Compile a seeded recipe in memory and return deterministic hashes.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "recipe_id": {"type": "string", "pattern": "^RCP-[0-9]{4}$"},
+                "seed": {"type": "integer"},
+            },
+            "required": ["recipe_id", "seed"],
+        },
+    },
+    {
+        "name": "aigame_assets_validate",
+        "title": "Validate game media",
+        "description": "Validate contracts, coverage, licenses, hashes, formats, and generated resources.",
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "aigame_assets_benchmark",
+        "title": "Benchmark media factory",
+        "description": "Measure the CPU-only sprite, sound, tile, runtime, and cache gates.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "sprite_count": {"type": "integer", "minimum": 1, "default": 500},
+                "sound_count": {"type": "integer", "minimum": 1, "default": 500},
+            },
+        },
+    },
+    {
+        "name": "aigame_assets_integrate",
+        "title": "Integrate validated media",
+        "description": "Write the checksum-bound Godot media registry after validation.",
+        "inputSchema": {"type": "object", "properties": {"apply": {"type": "boolean", "default": False}}},
+    },
 ]
 
 
@@ -153,6 +238,7 @@ def handle_request(root: Path, request: dict[str, Any]) -> dict[str, Any]:
                     {"name": "implement_work_item", "description": "Implement exactly one claimed work item."},
                     {"name": "review_work_item", "description": "Independently review evidence for one work item."},
                     {"name": "build_complete_game_concept", "description": "Complete one active concept task and follow the canonical automation policy."},
+                    {"name": "generate_complete_game_media", "description": "Plan and generate the approved blueprint's complete deterministic visual and audio inventory."},
                 ]
             },
         )
@@ -195,6 +281,40 @@ def handle_request(root: Path, request: dict[str, Any]) -> dict[str, Any]:
                 int(arguments["pull_request"]),
                 apply=bool(arguments.get("apply", False)),
             )
+        elif name == "aigame_assets_plan":
+            value = plan_assets(root, apply=bool(arguments.get("apply", False)))
+        elif name == "aigame_assets_next":
+            value = next_asset_task(root)
+        elif name == "aigame_assets_sample":
+            value = sample_assets(
+                root,
+                approval_path=arguments.get("approval_path"),
+                apply=bool(arguments.get("apply", False)),
+            )
+        elif name == "aigame_assets_generate":
+            value = generate_assets(
+                root,
+                arguments.get("asset_spec_id"),
+                all_assets=bool(arguments.get("all", False)),
+                jobs=int(arguments.get("jobs", 1)),
+                apply=bool(arguments.get("apply", False)),
+            )
+        elif name == "aigame_assets_compose":
+            value = compose_recipe(
+                root,
+                str(arguments["recipe_id"]),
+                seed=int(arguments["seed"]),
+            )
+        elif name == "aigame_assets_validate":
+            value = validate_assets(root)
+        elif name == "aigame_assets_benchmark":
+            value = benchmark_assets(
+                root,
+                sprite_count=int(arguments.get("sprite_count", 500)),
+                sound_count=int(arguments.get("sound_count", 500)),
+            )
+        elif name == "aigame_assets_integrate":
+            value = integrate_assets(root, apply=bool(arguments.get("apply", False)))
         else:
             raise ValueError(f"Unknown MCP tool: {name}")
         return _response(

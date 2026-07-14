@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TileSetSpec",
+  "type": "object",
+  "required": ["schema_version", "id", "revision", "status", "created_at", "updated_at", "input_fingerprint", "biome", "grid_size", "tiles", "adjacency", "required_neighbor_masks", "stage_constraints"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "id": {"type": "string", "pattern": "^TIL-[0-9]{4}$"},
+    "revision": {"type": "integer", "minimum": 1},
+    "status": {"enum": ["planned", "approved", "generated", "validated", "rework"]},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"},
+    "input_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "biome": {"type": "string", "minLength": 1},
+    "grid_size": {"const": 16},
+    "tiles": {"type": "array", "items": {"type": "object", "required": ["id", "role", "weight", "collision", "navigation"], "properties": {"id": {"type": "string"}, "role": {"type": "string"}, "weight": {"type": "number", "minimum": 0}, "collision": {"type": "boolean"}, "navigation": {"type": "boolean"}}}, "minItems": 1},
+    "adjacency": {"type": "object"},
+    "required_neighbor_masks": {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 255}, "uniqueItems": true},
+    "stage_constraints": {"type": "object"}
+  },
+  "additionalProperties": true
+}

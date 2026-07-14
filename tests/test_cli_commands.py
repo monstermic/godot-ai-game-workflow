@@ -202,6 +202,14 @@ class UpgradeTests(unittest.TestCase):
             automation_path.unlink()
             concept_state_path = root / ".aigame" / "state" / "concept.json"
             concept_state_path.unlink()
+            media_state_path = root / ".aigame" / "state" / "assets.json"
+            media_state_path.unlink()
+            media_config_path = root / ".aigame" / "media.toml"
+            media_config_path.unlink()
+            media_skill_path = root / ".aigame" / "agent-skills" / "generate-game-assets" / "SKILL.md"
+            media_skill_path.unlink()
+            runtime_composer_path = root / "addons" / "aigame_media" / "runtime_composer.gd"
+            runtime_composer_path.unlink()
             (root / ".aigame" / "schemas" / "automation-policy.schema.json").unlink()
             (root / ".aigame" / "vendor" / "aigame" / "automation.py").unlink()
             (root / ".aigame" / "vendor" / "aigame" / "schemas" / "automation-policy.schema.json").unlink()
@@ -230,6 +238,8 @@ class UpgradeTests(unittest.TestCase):
             )
             self.assertEqual(preview["status"], "dry_run")
             self.assertIn(".aigame/automation.json", preview["install"])
+            self.assertIn(".aigame/state/assets.json", preview["install"])
+            self.assertIn(".aigame/media.toml", preview["install"])
             self.assertEqual(lock_path.read_text(encoding="utf-8"), before)
             result = upgrade_workflow(
                 root,
@@ -245,6 +255,10 @@ class UpgradeTests(unittest.TestCase):
             self.assertEqual(lock["source_sha256"], source_checksum)
             self.assertTrue(automation_path.is_file())
             self.assertTrue(concept_state_path.is_file())
+            self.assertTrue(media_state_path.is_file())
+            self.assertTrue(media_config_path.is_file())
+            self.assertTrue(media_skill_path.is_file())
+            self.assertTrue(runtime_composer_path.is_file())
             self.assertEqual(next_concept_task(root)["gate"], "concept_start")
             self.assertTrue((root / ".aigame" / "schemas" / "automation-policy.schema.json").is_file())
             self.assertTrue((root / ".aigame" / "vendor" / "aigame" / "automation.py").is_file())

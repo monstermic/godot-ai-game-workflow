@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SoundSpec",
+  "type": "object",
+  "required": ["schema_version", "id", "revision", "status", "created_at", "updated_at", "input_fingerprint", "name", "category", "event", "layers", "duration_seconds", "sample_rate", "channels", "variants", "peak_dbfs", "loop", "accessibility_alternative"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "id": {"type": "string", "pattern": "^SND-[0-9]{4}$"},
+    "revision": {"type": "integer", "minimum": 1},
+    "status": {"enum": ["planned", "approved", "generated", "validated", "rework"]},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"},
+    "input_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "name": {"type": "string", "minLength": 1},
+    "category": {"enum": ["sfx", "ui", "ambience", "music"]},
+    "event": {"type": "string", "minLength": 1},
+    "layers": {"type": "array", "items": {"type": "object", "required": ["waveform", "frequency", "volume"], "properties": {"waveform": {"enum": ["sine", "square", "triangle", "saw", "pulse", "noise"]}, "frequency": {"type": "number", "minimum": 0}, "volume": {"type": "number", "minimum": 0, "maximum": 1}}}, "minItems": 1},
+    "duration_seconds": {"type": "number", "exclusiveMinimum": 0},
+    "sample_rate": {"const": 48000},
+    "channels": {"enum": [1, 2]},
+    "variants": {"type": "integer", "minimum": 1},
+    "peak_dbfs": {"type": "number", "maximum": -1},
+    "loop": {"type": "boolean"},
+    "accessibility_alternative": {"type": "string", "minLength": 1}
+  },
+  "additionalProperties": true
+}

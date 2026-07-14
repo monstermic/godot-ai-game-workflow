@@ -6,10 +6,10 @@ The workflow does not promise that an AI can determine whether a game is fun. It
 
 ## Quick start
 
-Requirements: Python 3.11+, Git, and Godot 4.7 for runtime validation. GitHub automation additionally requires `gh`.
+Requirements: Python 3.11+, Git, and Godot 4.7 for runtime validation. Install the pinned `media` extra for deterministic pixel and audio generation. GitHub automation additionally requires `gh`.
 
 ```powershell
-python -m pip install -e .
+python -m pip install -e ".[media]"
 aigame doctor --json
 aigame new "My Game" --destination ../my-game --godot-version 4.7 --apply --json
 cd ../my-game
@@ -49,10 +49,10 @@ After upgrading an existing game, preview and apply its remote policy with `aiga
 2. Run `aigame doctor --json`.
 3. Start concept work from the user's prompt, then complete one `aigame concept next --json` task at a time.
 4. In human-gated mode, stop for direction, product identity, and complete-blueprint approval. In AI staging mode, record agent approvals and continue automatically.
-5. Run `aigame next --json`, claim one eligible item, and request its bounded context packet.
-6. Implement and run `aigame validate WI-#### --json` plus Godot tests.
-7. Persist a `RunResult` through `aigame checkpoint`.
-8. Open a PR. Human-gated projects use owner merge; AI staging projects use the checked, approval-bound staging merge command.
+5. Follow `aigame assets next --json` through exhaustive planning, style sampling, deterministic generation, validation, and Godot integration.
+6. Run `aigame next --json`, claim one eligible item, and request its bounded context packet.
+7. Implement and run `aigame validate WI-#### --json` plus Godot tests.
+8. Persist a `RunResult` through `aigame checkpoint` and open a PR. Human-gated projects use owner merge; AI staging projects use the checked, approval-bound staging merge command.
 
 Codex, OpenCode, Claude Code, Cursor, and Copilot adapters are instruction shims only. The schemas, CLI behavior, Git history, and evidence records are authoritative. Hosts supporting Model Context Protocol can run `python -m aigame.mcp`.
 
@@ -64,12 +64,13 @@ Codex, OpenCode, Claude Code, Cursor, and Copilot adapters are instruction shims
 - Resumable concept, context, and checkpoint records.
 - Safe, idempotent GitHub issue mirroring.
 - Optional JSON-over-stdio image/audio adapters with strict provenance.
+- A CPU-only 16x16 media factory for modular sprites, complete animation sets, terrain atlases, seeded connected stages, particles, UI, SFX variants, ambience, and adaptive music stems.
 - A tested 2D Godot reference slice with movement, hazard, win/loss, reward, and restart.
 - Reusable GitHub Actions for contracts, Godot tests/export, provenance, review, RCs, and same-artifact release.
 - Apache-2.0 workflow tooling with separately licensed generated game output.
 
-See [concept blueprint](docs/concept-blueprint.md), [AI staging mode](docs/ai-staging-mode.md), [architecture](docs/architecture.md), [workflow gates](docs/workflow.md), [adapter contract](docs/adapter-contract.md), and [media policy](docs/media-policy.md).
+See [concept blueprint](docs/concept-blueprint.md), [pixel media factory](docs/pixel-media-factory.md), [AI staging mode](docs/ai-staging-mode.md), [architecture](docs/architecture.md), [workflow gates](docs/workflow.md), [adapter contract](docs/adapter-contract.md), and [media policy](docs/media-policy.md).
 
 ## Status
 
-V1.2 targets offline 2D GDScript games and Windows desktop exports. The concept engine is genre-neutral and ships universal plus roguelite quality profiles. Capability packs describe 3D, narrative, localization, persistence, mobile, networking, and other future extensions without pretending those pipelines are already implemented.
+V1.3 targets offline top-down 2D GDScript games, 16x16 pixel media, procedural chiptune audio, and Windows desktop exports. The concept engine is genre-neutral and ships universal plus roguelite quality profiles. Capability packs describe 3D, narrative, localization, persistence, mobile, networking, and other future extensions without pretending those pipelines are already implemented.

@@ -29,6 +29,10 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
         with:
           lfs: true
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        if: ${{ hashFiles('pyproject.toml') != '' }}
+        with:
+          python-version: '3.11'
       - name: Validate project path
         shell: bash
         run: python -c 'import os,pathlib; pathlib.Path(os.environ["PROJECT_PATH"]).resolve().relative_to(pathlib.Path.cwd().resolve())'
@@ -49,7 +53,14 @@ jobs:
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
       - name: Import and parse project
         shell: bash
-        run: godot-bin --headless --path "$PROJECT_PATH" --editor --quit-after 2
+        run: godot-bin --headless --path "$PROJECT_PATH" --import
+      - name: Prove generated media contracts in Godot
+        if: ${{ hashFiles('pyproject.toml') != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -e '.[media]'
+          python -m unittest tests.test_media_factory.MediaFactoryTests.test_godot_headless_loads_every_generated_runtime_asset -v
       - name: Run deterministic GDScript tests
         shell: bash
         run: godot-bin --headless --path "$PROJECT_PATH" --script res://tests/run_tests.gd

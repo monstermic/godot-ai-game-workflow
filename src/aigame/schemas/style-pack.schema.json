@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StylePack",
+  "type": "object",
+  "required": ["schema_version", "id", "revision", "status", "created_at", "updated_at", "input_fingerprint", "name", "grid_size", "perspective", "directions", "palette", "layer_slots", "animation_defaults", "audio_vocabulary"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "id": {"type": "string", "pattern": "^STY-[0-9]{4}$"},
+    "revision": {"type": "integer", "minimum": 1},
+    "status": {"enum": ["draft", "sample", "approved", "rework"]},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"},
+    "input_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "name": {"type": "string", "minLength": 1},
+    "grid_size": {"const": 16},
+    "perspective": {"const": "top_down"},
+    "directions": {"const": ["down", "left", "right", "up"]},
+    "palette": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string", "pattern": "^#[0-9a-fA-F]{8}$"}},
+    "layer_slots": {"type": "array", "items": {"type": "string"}, "minItems": 1, "uniqueItems": true},
+    "animation_defaults": {"type": "object"},
+    "audio_vocabulary": {"type": "object"}
+  },
+  "additionalProperties": true
+}

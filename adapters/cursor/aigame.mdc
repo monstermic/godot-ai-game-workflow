@@ -3,4 +3,4 @@ description: Portable AI game workflow
 alwaysApply: true
 ---
 
-Read and follow `AGENTS.md` and `.aigame/automation.json`. If concept state is incomplete, submit one schema-valid concept result at a time. Human-gated mode stops for approval; AI-staging mode records agent approvals and continues. Use context and validation before proposing completion, target `staging`, and use only the checked, exact-approval-bound `aigame staging merge` integration path.
+Read and follow `AGENTS.md` and `.aigame/automation.json`. Complete concept state, then follow `aigame assets next --json` through exhaustive planning, sampling, deterministic generation, validation, and integration. Human-gated mode stops for approval; AI-staging mode records agent approvals and continues. Keep dependency/provider/model gates protected, target `staging`, and use only the exact-approval-bound staging integration path.

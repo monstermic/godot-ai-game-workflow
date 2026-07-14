@@ -136,6 +136,14 @@ class McpTests(unittest.TestCase):
                 "aigame_mode_set",
                 "aigame_staging_init",
                 "aigame_staging_merge",
+                "aigame_assets_plan",
+                "aigame_assets_next",
+                "aigame_assets_sample",
+                "aigame_assets_generate",
+                "aigame_assets_compose",
+                "aigame_assets_validate",
+                "aigame_assets_benchmark",
+                "aigame_assets_integrate",
             },
         )
 

@@ -11,6 +11,7 @@ from jsonschema import Draft202012Validator
 
 from .core import fingerprint, workflow_snapshot_checksum
 from .concept import validate_concept
+from .media import validate_assets
 
 
 COMMON_FIELDS = {
@@ -226,6 +227,12 @@ def validate_project(root: Path | str) -> dict[str, Any]:
         concept_report = validate_concept(project, require_final=require_final)
         errors.extend(f"Concept: {message}" for message in concept_report.get("errors", []))
 
+    media_report = {"status": "passed", "errors": [], "counts": {}}
+    media_state_path = project / ".aigame" / "state" / "assets.json"
+    if media_state_path.is_file():
+        media_report = validate_assets(project)
+        errors.extend(f"Media: {message}" for message in media_report.get("errors", []))
+
     return {
         "schema_version": "1.0",
         "status": "failed" if errors else "passed",
@@ -243,5 +250,7 @@ def validate_project(root: Path | str) -> dict[str, Any]:
                 for group, count in concept_report.get("counts", {}).items()
                 if group != "tasks"
             ),
+            "media_asset_specs": media_report.get("counts", {}).get("asset_specs", 0),
+            "media_recipes": media_report.get("counts", {}).get("recipes", 0),
         },
     }

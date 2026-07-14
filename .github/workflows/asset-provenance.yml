@@ -34,11 +34,13 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -f pyproject.toml ]]; then
-            python -m pip install -e .
+            python -m pip install -e '.[media]'
             temporary="$(mktemp -d)"
             aigame new "Provenance Fixture" --destination "$temporary/game" --godot-version 4.7 --apply --json
             aigame validate --project "$temporary/game" --json
+            aigame assets validate --project "$temporary/game" --json
           else
-            python -m pip install 'jsonschema>=4.26,<5'
+            python -m pip install 'jsonschema>=4.26,<5' 'Pillow==12.3.0' 'numpy==2.4.6'
             PYTHONPATH="$PROJECT_PATH/.aigame/vendor" python -m aigame validate --project "$PROJECT_PATH" --json
+            PYTHONPATH="$PROJECT_PATH/.aigame/vendor" python -m aigame assets validate --project "$PROJECT_PATH" --json
           fi
