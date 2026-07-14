@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ProjectConfig",
+  "type": "object",
+  "required": ["schema_version", "revision", "name", "slug", "visibility", "source_license", "workflow_version", "current_milestone", "godot_version", "godot_release", "godot_linux_sha512", "godot_windows_sha512", "godot_templates_sha512", "renderer", "primary_target", "serial_active_slice", "capability_packs", "available_capability_packs", "allowed_commands", "budgets", "risk"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "revision": {"type": "integer", "minimum": 1},
+    "name": {"type": "string", "minLength": 1},
+    "slug": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "visibility": {"enum": ["private", "public"]},
+    "source_license": {"type": "string", "minLength": 1},
+    "workflow_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "current_milestone": {"type": "string", "minLength": 1},
+    "godot_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+(?:\\.[0-9]+)?$"},
+    "godot_release": {"type": "string", "minLength": 1},
+    "godot_linux_sha512": {"type": "string", "pattern": "^[0-9a-f]{128}$"},
+    "godot_windows_sha512": {"type": "string", "pattern": "^[0-9a-f]{128}$"},
+    "godot_templates_sha512": {"type": "string", "pattern": "^[0-9a-f]{128}$"},
+    "renderer": {"enum": ["gl_compatibility", "mobile", "forward_plus"]},
+    "primary_target": {"type": "string", "minLength": 1},
+    "serial_active_slice": {"const": true},
+    "capability_packs": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "available_capability_packs": {"type": "array", "items": {"enum": ["3d", "narrative", "localization", "mobile", "persistence", "networking"]}, "uniqueItems": true},
+    "allowed_commands": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "budgets": {
+      "type": "object",
+      "required": ["target_fps", "target_width", "target_height", "max_binary_mb"],
+      "properties": {
+        "target_fps": {"type": "integer", "minimum": 1},
+        "target_width": {"type": "integer", "minimum": 1},
+        "target_height": {"type": "integer", "minimum": 1},
+        "max_binary_mb": {"type": "integer", "minimum": 1}
+      }
+    },
+    "risk": {
+      "type": "object",
+      "required": ["human_approval"],
+      "properties": {"human_approval": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}}
+    }
+  },
+  "additionalProperties": true
+}

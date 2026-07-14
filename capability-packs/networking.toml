@@ -1,0 +1,5 @@
+schema_version = "1.0"
+id = "networking"
+status = "declared"
+implemented = false
+scope = ["authority", "protocol", "abuse-controls", "online-tests"]

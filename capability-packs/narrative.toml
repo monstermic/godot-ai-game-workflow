@@ -1,0 +1,5 @@
+schema_version = "1.0"
+id = "narrative"
+status = "declared"
+implemented = false
+scope = ["dialogue", "branching", "content-validation"]

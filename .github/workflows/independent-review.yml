@@ -1,0 +1,37 @@
+name: Independent Review
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  independent-review:
+    name: independent-review
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require approval of the current head by a distinct identity
+        uses: actions/github-script@d746ffe35508b1917358783b479e04febd2b8f71
+        with:
+          script: |
+            const pull = context.payload.pull_request;
+            if (!pull) {
+              core.setFailed('Independent review is only meaningful for a pull request.');
+              return;
+            }
+            const reviews = await github.paginate(github.rest.pulls.listReviews, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pull.number,
+              per_page: 100,
+            });
+            const approved = reviews.some(review =>
+              review.state === 'APPROVED' &&
+              review.user?.login !== pull.user.login &&
+              review.commit_id === pull.head.sha
+            );
+            if (!approved) {
+              core.setFailed(`Head ${pull.head.sha} needs approval from an identity other than ${pull.user.login}.`);
+            }

@@ -1,0 +1,44 @@
+name: Asset Provenance
+
+on:
+  workflow_call:
+    inputs:
+      project-path:
+        type: string
+        default: .
+  workflow_dispatch:
+    inputs:
+      project-path:
+        type: string
+        default: .
+
+permissions:
+  contents: read
+
+jobs:
+  asset-provenance:
+    name: asset-provenance
+    runs-on: ubuntu-latest
+    env:
+      PROJECT_PATH: ${{ inputs.project-path }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - name: Validate project path
+        shell: bash
+        run: python -c 'import os,pathlib; pathlib.Path(os.environ["PROJECT_PATH"]).resolve().relative_to(pathlib.Path.cwd().resolve())'
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - name: Validate provenance and traceability
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f pyproject.toml ]]; then
+            python -m pip install -e .
+            temporary="$(mktemp -d)"
+            aigame new "Provenance Fixture" --destination "$temporary/game" --godot-version 4.7 --apply --json
+            aigame validate --project "$temporary/game" --json
+          else
+            python -m pip install 'jsonschema>=4.26,<5'
+            PYTHONPATH="$PROJECT_PATH/.aigame/vendor" python -m aigame validate --project "$PROJECT_PATH" --json
+          fi

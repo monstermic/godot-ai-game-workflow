@@ -1,0 +1,23 @@
+name: Confirmed bug
+description: Report reproducible behavior against an exact build.
+title: "[Bug] "
+labels: ["type:bug", "status:intake"]
+body:
+  - type: input
+    id: build
+    attributes:
+      label: Build or release candidate
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true

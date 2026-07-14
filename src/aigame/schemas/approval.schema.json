@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Approval",
+  "type": "object",
+  "required": ["schema_version", "id", "revision", "status", "created_at", "updated_at", "input_fingerprint", "scope_hash", "commit_sha", "approver"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "id": {"type": "string", "pattern": "^APR-[0-9]{4}$"},
+    "revision": {"type": "integer", "minimum": 1},
+    "status": {"enum": ["approved", "rejected", "expired"]},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"},
+    "input_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "scope_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "commit_sha": {"type": "string", "pattern": "^(?:[0-9a-f]{40}|UNCOMMITTED)$"},
+    "approver": {"type": "string", "minLength": 1},
+    "decision": {"type": "string"},
+    "approved_at": {"type": "string", "format": "date-time"}
+  },
+  "additionalProperties": true
+}

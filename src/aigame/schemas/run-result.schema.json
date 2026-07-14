@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RunResult",
+  "type": "object",
+  "required": ["schema_version", "status", "work_item_id", "changed_artifacts", "evidence", "next_actions"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "status": {"enum": ["passed", "failed", "blocked", "needs_human"]},
+    "work_item_id": {"type": "string", "pattern": "^WI-[0-9]{4}$"},
+    "changed_artifacts": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "evidence": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "next_actions": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,30 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+
+def _load(path: Path) -> dict[str, Any]:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def build_context(root: Path | str, work_item_id: str) -> dict[str, Any]:
+    project = Path(root).resolve()
+    item_path = project / "work" / "items" / f"{work_item_id}.json"
+    if not item_path.is_file():
+        raise FileNotFoundError(f"Unknown work item: {work_item_id}")
+    item = _load(item_path)
+    requirements = []
+    for requirement_id in item.get("requirements", []):
+        requirements.append(_load(project / "work" / "requirements" / f"{requirement_id}.json"))
+    documents: dict[str, str] = {}
+    for path in sorted((project / "docs").glob("*.md")):
+        documents[path.stem] = path.read_text(encoding="utf-8")
+    return {
+        "schema_version": "1.0",
+        "status": "passed",
+        "work_item": item,
+        "requirements": requirements,
+        "documents": documents,
+    }

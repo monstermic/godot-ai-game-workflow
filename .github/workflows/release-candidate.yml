@@ -1,0 +1,85 @@
+name: Release Candidate
+
+on:
+  workflow_call:
+    inputs:
+      project-path:
+        type: string
+        default: .
+      name:
+        type: string
+        required: true
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release-candidate:
+    name: release-candidate
+    runs-on: ubuntu-latest
+    env:
+      PROJECT_PATH: ${{ inputs.project-path }}
+      GODOT_RELEASE: '4.7-stable'
+      GODOT_VERSION: '4.7'
+      GODOT_LINUX_SHA512: b639ca9c1ddea39bb3df89bd5283a51ca6047467abe6b25e9436566f2b2082ede633025073989ecf39c7d5d3c2493d80ea13e3af6dd5e261bbf89e462d6d2214
+      GODOT_TEMPLATES_SHA512: 1035dfde4edcc2472bb0c0b9610ce3ee9302642c2b9957e9066372f9f6bb759ab250c8887551a66f0bc5f51bbd9a58bb45e33a0f29844e97615a9b1138c1120e
+      RC_NAME: ${{ inputs.name }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          lfs: true
+      - name: Validate project path
+        shell: bash
+        run: python -c 'import os,pathlib; pathlib.Path(os.environ["PROJECT_PATH"]).resolve().relative_to(pathlib.Path.cwd().resolve())'
+      - name: Install pinned Godot
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://github.com/godotengine/godot-builds/releases/download/${GODOT_RELEASE}"
+          curl --fail --location --retry 3 -o "$RUNNER_TEMP/godot.zip" "$base/Godot_v${GODOT_RELEASE}_linux.x86_64.zip"
+          echo "$GODOT_LINUX_SHA512  $RUNNER_TEMP/godot.zip" | sha512sum -c --strict
+          unzip -q "$RUNNER_TEMP/godot.zip" -d "$RUNNER_TEMP/godot"
+          install -m 0755 "$RUNNER_TEMP/godot/Godot_v${GODOT_RELEASE}_linux.x86_64" "$RUNNER_TEMP/godot-bin"
+          curl --fail --location --retry 3 -o "$RUNNER_TEMP/templates.tpz" "$base/Godot_v${GODOT_RELEASE}_export_templates.tpz"
+          echo "$GODOT_TEMPLATES_SHA512  $RUNNER_TEMP/templates.tpz" | sha512sum -c --strict
+          unzip -q "$RUNNER_TEMP/templates.tpz" -d "$RUNNER_TEMP/export"
+          mkdir -p "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          cp -R "$RUNNER_TEMP/export/templates/." "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/"
+      - name: Test and build immutable candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$RC_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$ ]]; then
+            echo "Invalid RC name: $RC_NAME" >&2
+            exit 2
+          fi
+          "$RUNNER_TEMP/godot-bin" --headless --path "$PROJECT_PATH" --script res://tests/run_tests.gd
+          mkdir -p "$PROJECT_PATH/builds"
+          "$RUNNER_TEMP/godot-bin" --headless --path "$PROJECT_PATH" --export-release "Windows Desktop" builds/game.exe
+          artifact="aigame-${RC_NAME}-${GITHUB_SHA}.zip"
+          (cd "$PROJECT_PATH/builds" && zip -9 "$GITHUB_WORKSPACE/$artifact" game.exe game.pck 2>/dev/null || zip -9 "$GITHUB_WORKSPACE/$artifact" game.exe)
+          digest="$(sha256sum "$artifact" | cut -d' ' -f1)"
+          python - "$RC_NAME" "$GITHUB_SHA" "$artifact" "$digest" > release-metadata.json <<'PY'
+          import json
+          import sys
+          name, commit_sha, artifact, digest = sys.argv[1:]
+          print(json.dumps({
+              "schema_version": "1.0",
+              "name": name,
+              "commit_sha": commit_sha,
+              "artifact": artifact,
+              "artifact_sha256": digest,
+              "immutable": True,
+          }, indent=2))
+          PY
+      - name: Attest candidate
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373
+        with:
+          subject-path: aigame-${{ inputs.name }}-${{ github.sha }}.zip
+      - name: Create immutable draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: gh release create "$RC_NAME" "aigame-${RC_NAME}-${GITHUB_SHA}.zip" release-metadata.json --draft --target "$GITHUB_SHA" --title "$RC_NAME"

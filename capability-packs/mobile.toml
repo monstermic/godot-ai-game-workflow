@@ -1,0 +1,5 @@
+schema_version = "1.0"
+id = "mobile"
+status = "declared"
+implemented = false
+scope = ["touch", "exports", "device-matrix", "store-packaging"]

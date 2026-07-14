@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "godot-ai-game-workflow"
+version = "1.0.0"
+description = "Portable, GitHub-native AI game creation workflow for Godot"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+authors = [{name = "Monstermic"}]
+dependencies = ["jsonschema>=4.26,<5"]
+keywords = ["godot", "ai-agent", "game-development", "github-actions", "workflow"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Games/Entertainment",
+]
+
+[project.urls]
+Homepage = "https://github.com/monstermic/godot-ai-game-workflow"
+Issues = "https://github.com/monstermic/godot-ai-game-workflow/issues"
+
+[project.scripts]
+aigame = "aigame.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"aigame.schemas" = ["*.json"]

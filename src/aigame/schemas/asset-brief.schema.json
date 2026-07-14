@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AssetBrief",
+  "type": "object",
+  "required": ["schema_version", "id", "kind", "purpose", "runtime_path"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "id": {"type": "string", "pattern": "^AST-[0-9]{4}$"},
+    "kind": {"enum": ["image", "animation", "model", "font", "sound", "music", "voice", "video", "data"]},
+    "purpose": {"type": "string", "minLength": 1},
+    "runtime_path": {"type": "string", "minLength": 1},
+    "source_references": {"type": "array", "items": {"type": "string"}},
+    "constraints": {"type": "object"},
+    "license_allowlist": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": true
+}

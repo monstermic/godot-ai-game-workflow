@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AgentCapabilities",
+  "type": "object",
+  "required": ["schema_version", "status", "workflow_version", "capabilities", "python", "cwd"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "status": {"const": "passed"},
+    "workflow_version": {"type": "string"},
+    "capabilities": {
+      "type": "object",
+      "required": ["filesystem", "shell", "git", "github", "godot", "browser", "image_generation", "audio_generation", "network", "human_approval"],
+      "additionalProperties": {"type": "boolean"}
+    },
+    "python": {"type": "string"},
+    "cwd": {"type": "string"}
+  },
+  "additionalProperties": false
+}

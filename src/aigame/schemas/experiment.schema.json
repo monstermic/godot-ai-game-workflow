@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Experiment",
+  "type": "object",
+  "required": ["schema_version", "id", "revision", "status", "created_at", "updated_at", "input_fingerprint", "title", "hypothesis", "method", "success_criteria", "result", "conclusion"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "id": {"type": "string", "pattern": "^EXP-[0-9]{4}$"},
+    "revision": {"type": "integer", "minimum": 1},
+    "status": {"enum": ["draft", "ready", "running", "passed", "failed", "inconclusive", "cancelled"]},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"},
+    "input_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "title": {"type": "string", "minLength": 1},
+    "hypothesis": {"type": "string", "minLength": 1},
+    "method": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "success_criteria": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "result": {"type": "string"},
+    "conclusion": {"type": "string"},
+    "work_item_ids": {"type": "array", "items": {"type": "string", "pattern": "^WI-[0-9]{4}$"}, "uniqueItems": true}
+  },
+  "additionalProperties": true
+}

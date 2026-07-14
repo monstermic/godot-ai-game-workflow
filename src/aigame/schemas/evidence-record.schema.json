@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EvidenceRecord",
+  "type": "object",
+  "required": ["schema_version", "id", "revision", "status", "created_at", "updated_at", "input_fingerprint", "kind", "work_item_id", "requirement_ids", "artifact_sha256"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "id": {"type": "string", "pattern": "^EVD-[0-9]{4}$"},
+    "revision": {"type": "integer", "minimum": 1},
+    "status": {"enum": ["current", "stale", "failed", "waived"]},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"},
+    "input_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "kind": {"enum": ["test", "runtime", "playtest", "review", "build", "release", "approval"]},
+    "work_item_id": {"type": "string", "pattern": "^WI-[0-9]{4}$"},
+    "requirement_ids": {"type": "array", "items": {"type": "string", "pattern": "^REQ-[0-9]{4}$"}},
+    "artifact_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  },
+  "additionalProperties": true
+}

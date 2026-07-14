@@ -1,0 +1,5 @@
+schema_version = "1.0"
+id = "persistence"
+status = "declared"
+implemented = false
+scope = ["save-format", "migration", "backup", "recovery"]

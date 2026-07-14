@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  pull_request:
+  pull_request_review:
+    types: [submitted, dismissed]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    uses: ./.github/workflows/contract.yml
+    with:
+      project-path: .
+
+  godot-quality:
+    uses: ./.github/workflows/godot-quality.yml
+    with:
+      project-path: game-template
+
+  asset-provenance:
+    uses: ./.github/workflows/asset-provenance.yml
+    with:
+      project-path: .
+
+  independent-review:
+    if: github.event_name == 'pull_request' || github.event_name == 'pull_request_review'
+    permissions:
+      contents: read
+      pull-requests: read
+    uses: ./.github/workflows/independent-review.yml

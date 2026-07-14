@@ -1,0 +1,45 @@
+name: Release
+
+on:
+  workflow_call:
+    inputs:
+      name:
+        type: string
+        required: true
+      artifact-sha256:
+        type: string
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: release
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Download the candidate without rebuilding
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RC_NAME: ${{ inputs.name }}
+        shell: bash
+        run: gh release download "$RC_NAME" --pattern 'aigame-*.zip' --pattern release-metadata.json
+      - name: Verify approved digest
+        env:
+          EXPECTED: ${{ inputs.artifact-sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact="$(find . -maxdepth 1 -name 'aigame-*.zip' -print -quit)"
+          actual="$(sha256sum "$artifact" | cut -d' ' -f1)"
+          test "$actual" = "$EXPECTED"
+          python -c 'import json,os; d=json.load(open("release-metadata.json")); assert d["artifact_sha256"] == os.environ["EXPECTED"]'
+      - name: Publish the same candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RC_NAME: ${{ inputs.name }}
+        shell: bash
+        run: gh release edit "$RC_NAME" --draft=false --latest

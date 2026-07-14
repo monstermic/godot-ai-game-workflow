@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AssetRecord",
+  "type": "object",
+  "required": ["schema_version", "id", "revision", "status", "created_at", "updated_at", "input_fingerprint", "kind", "runtime_path", "license", "provenance", "sha256"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "id": {"type": "string", "pattern": "^AST-[0-9]{4}$"},
+    "revision": {"type": "integer", "minimum": 1},
+    "status": {"enum": ["planned", "placeholder", "draft", "generated", "review", "integrated", "optimized", "final", "blocked"]},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"},
+    "input_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "kind": {"enum": ["image", "animation", "model", "font", "sound", "music", "voice", "video", "data"]},
+    "runtime_path": {"type": "string", "minLength": 1},
+    "license": {"enum": ["original", "CC0-1.0", "CC-BY-4.0", "Apache-2.0", "proprietary", "commercial"]},
+    "provenance": {"type": "object"},
+    "sha256": {"type": "string", "pattern": "^(?:[0-9a-f]{64})?$"}
+  },
+  "additionalProperties": true
+}

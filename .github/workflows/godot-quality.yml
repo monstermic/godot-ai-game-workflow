@@ -1,0 +1,67 @@
+name: Godot Quality
+
+on:
+  workflow_call:
+    inputs:
+      project-path:
+        type: string
+        default: .
+  workflow_dispatch:
+    inputs:
+      project-path:
+        type: string
+        default: game-template
+
+permissions:
+  contents: read
+
+jobs:
+  godot-quality:
+    name: godot-quality
+    runs-on: ubuntu-latest
+    env:
+      PROJECT_PATH: ${{ inputs.project-path }}
+      GODOT_VERSION: '4.7'
+      GODOT_RELEASE: '4.7-stable'
+      GODOT_LINUX_SHA512: b639ca9c1ddea39bb3df89bd5283a51ca6047467abe6b25e9436566f2b2082ede633025073989ecf39c7d5d3c2493d80ea13e3af6dd5e261bbf89e462d6d2214
+      GODOT_TEMPLATES_SHA512: 1035dfde4edcc2472bb0c0b9610ce3ee9302642c2b9957e9066372f9f6bb759ab250c8887551a66f0bc5f51bbd9a58bb45e33a0f29844e97615a9b1138c1120e
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          lfs: true
+      - name: Validate project path
+        shell: bash
+        run: python -c 'import os,pathlib; pathlib.Path(os.environ["PROJECT_PATH"]).resolve().relative_to(pathlib.Path.cwd().resolve())'
+      - name: Install pinned Godot and export templates
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://github.com/godotengine/godot-builds/releases/download/${GODOT_RELEASE}"
+          curl --fail --location --retry 3 --output "$RUNNER_TEMP/godot.zip" "$base/Godot_v${GODOT_RELEASE}_linux.x86_64.zip"
+          echo "$GODOT_LINUX_SHA512  $RUNNER_TEMP/godot.zip" | sha512sum --check --strict
+          unzip -q "$RUNNER_TEMP/godot.zip" -d "$RUNNER_TEMP/godot"
+          install -m 0755 "$RUNNER_TEMP/godot/Godot_v${GODOT_RELEASE}_linux.x86_64" "$RUNNER_TEMP/godot-bin"
+          curl --fail --location --retry 3 --output "$RUNNER_TEMP/templates.tpz" "$base/Godot_v${GODOT_RELEASE}_export_templates.tpz"
+          echo "$GODOT_TEMPLATES_SHA512  $RUNNER_TEMP/templates.tpz" | sha512sum --check --strict
+          unzip -q "$RUNNER_TEMP/templates.tpz" -d "$RUNNER_TEMP/export"
+          mkdir -p "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          cp -R "$RUNNER_TEMP/export/templates/." "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: Import and parse project
+        shell: bash
+        run: godot-bin --headless --path "$PROJECT_PATH" --editor --quit-after 2
+      - name: Run deterministic GDScript tests
+        shell: bash
+        run: godot-bin --headless --path "$PROJECT_PATH" --script res://tests/run_tests.gd
+      - name: Export Windows debug build
+        shell: bash
+        run: |
+          mkdir -p "$PROJECT_PATH/builds"
+          godot-bin --headless --path "$PROJECT_PATH" --export-debug "Windows Desktop" builds/reference-game.exe
+      - name: Upload build
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: windows-debug-${{ github.sha }}
+          path: ${{ inputs.project-path }}/builds/
+          if-no-files-found: error
+          retention-days: 14

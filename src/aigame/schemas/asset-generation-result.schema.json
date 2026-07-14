@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AssetGenerationResult",
+  "type": "object",
+  "required": ["schema_version", "status", "asset_id", "license", "provenance"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "status": {"enum": ["placeholder", "generated", "failed", "needs_human"]},
+    "asset_id": {"type": "string", "pattern": "^AST-[0-9]{4}$"},
+    "kind": {"type": "string"},
+    "runtime_path": {"type": "string"},
+    "license": {"type": "string", "minLength": 1},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "provenance": {"type": "object"},
+    "error": {"type": "string"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "generated"}}},
+      "then": {"required": ["sha256"]}
+    }
+  ],
+  "additionalProperties": true
+}

@@ -1,0 +1,5 @@
+schema_version = "1.0"
+id = "3d"
+status = "declared"
+implemented = false
+scope = ["scenes", "meshes", "lighting", "physics", "performance"]

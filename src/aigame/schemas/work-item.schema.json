@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://monstermic.github.io/godot-ai-game-workflow/schemas/work-item.schema.json",
+  "title": "WorkItem",
+  "type": "object",
+  "required": [
+    "schema_version", "id", "revision", "status", "created_at", "updated_at", "input_fingerprint", "title",
+    "type", "milestone", "requirements", "dependencies", "risk", "player_value",
+    "estimate", "required_capabilities", "unknowns", "scope", "tests",
+    "playtest_required", "definition_of_done"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "id": {"type": "string", "pattern": "^WI-[0-9]{4}$"},
+    "revision": {"type": "integer", "minimum": 1},
+    "status": {"enum": ["draft", "ready", "claimed", "implementing", "validating", "review", "playtest", "done", "blocked", "rework", "cancelled"]},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"},
+    "input_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "title": {"type": "string", "minLength": 1},
+    "type": {"type": "string", "minLength": 1},
+    "milestone": {"type": "string", "minLength": 1},
+    "requirements": {"type": "array", "items": {"type": "string", "pattern": "^REQ-[0-9]{4}$"}, "uniqueItems": true},
+    "dependencies": {"type": "array", "items": {"type": "string", "pattern": "^WI-[0-9]{4}$"}, "uniqueItems": true},
+    "release_blocker": {"type": "boolean"},
+    "risk": {"type": "integer", "minimum": 1, "maximum": 5},
+    "unblocks": {"type": "integer", "minimum": 0},
+    "player_value": {"type": "integer", "minimum": 1, "maximum": 5},
+    "estimate": {"type": "integer", "minimum": 1},
+    "required_capabilities": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "unknowns": {"type": "array", "items": {"type": "object", "required": ["level", "question"]}},
+    "scope": {"type": "array", "items": {"type": "string"}},
+    "tests": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "playtest_required": {"type": "boolean"},
+    "definition_of_done": {"type": "array", "items": {"type": "string"}, "minItems": 1}
+  },
+  "additionalProperties": true
+}

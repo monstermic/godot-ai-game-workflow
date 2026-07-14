@@ -1,0 +1,16 @@
+{
+  "title": "AI Game Workflow",
+  "statuses": ["Intake", "Ready", "Active", "Review", "Playtest", "Blocked", "Done"],
+  "fields": {
+    "Work ID": "TEXT",
+    "Type": ["Discovery", "Experiment", "Feature", "Bug", "Content", "Release"],
+    "Milestone": "TEXT",
+    "Phase": ["Bootstrap", "Discovery", "Experiment", "First Playable", "Vertical Slice", "Production", "Alpha", "Beta", "Release Candidate", "Post-release"],
+    "Risk": "NUMBER",
+    "Capability": "TEXT",
+    "Priority": "NUMBER",
+    "Playtest Required": ["Yes", "No"],
+    "Agent": "TEXT",
+    "Build": "TEXT"
+  }
+}

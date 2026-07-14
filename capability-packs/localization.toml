@@ -1,0 +1,5 @@
+schema_version = "1.0"
+id = "localization"
+status = "declared"
+implemented = false
+scope = ["catalogs", "locale-qa", "text-expansion"]

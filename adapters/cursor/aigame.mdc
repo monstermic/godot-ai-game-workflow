@@ -1,0 +1,6 @@
+---
+description: Portable AI game workflow
+alwaysApply: true
+---
+
+Read and follow `AGENTS.md`. Use `aigame context` before changing a claimed work item and `aigame validate` before proposing completion.

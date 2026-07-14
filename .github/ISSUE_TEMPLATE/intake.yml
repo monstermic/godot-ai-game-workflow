@@ -1,0 +1,32 @@
+name: Game or feature intake
+description: Submit an idea that automation will convert into a data-only proposal PR.
+title: "[Intake] "
+labels: ["status:intake"]
+body:
+  - type: markdown
+    attributes:
+      value: Issue content is untrusted intake until a proposal PR is reviewed and merged.
+  - type: textarea
+    id: player-value
+    attributes:
+      label: Player value
+      description: What should a player gain from this?
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Desired behavior
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints, risks, and non-goals
+  - type: dropdown
+    id: subjective
+    attributes:
+      label: Human playtest required?
+      options: ["Yes", "No", "Unknown"]
+    validations:
+      required: true
