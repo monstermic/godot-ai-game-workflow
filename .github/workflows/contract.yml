@@ -35,7 +35,7 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -f pyproject.toml ]]; then
-            python -m pip install -e .
+            python -m pip install -e '.[test]'
           else
             python -m pip install 'jsonschema>=4.26,<5'
             echo "PYTHONPATH=$GITHUB_WORKSPACE/$PROJECT_PATH/.aigame/vendor" >> "$GITHUB_ENV"

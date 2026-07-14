@@ -165,7 +165,40 @@ def main(argv: list[str] | None = None) -> int:
                     "action": "create_and_push" if args.apply else "preview",
                 }
             if args.apply:
-                git_commands = [["git", "init", "-b", "main"]]
+                initialized = subprocess.run(
+                    ["git", "init", "-b", "main"],
+                    cwd=args.destination,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                if initialized.returncode != 0:
+                    raise RuntimeError(initialized.stderr.strip() or "Unable to initialize Git")
+                identity_defaults = {
+                    "user.name": "AI Game Workflow",
+                    "user.email": "aigame@users.noreply.github.com",
+                }
+                for key, default in identity_defaults.items():
+                    current = subprocess.run(
+                        ["git", "config", "--get", key],
+                        cwd=args.destination,
+                        text=True,
+                        capture_output=True,
+                        check=False,
+                    )
+                    if current.returncode != 0 or not current.stdout.strip():
+                        configured = subprocess.run(
+                            ["git", "config", "--local", key, default],
+                            cwd=args.destination,
+                            text=True,
+                            capture_output=True,
+                            check=False,
+                        )
+                        if configured.returncode != 0:
+                            raise RuntimeError(
+                                configured.stderr.strip() or f"Unable to configure {key}"
+                            )
+                git_commands: list[list[str]] = []
                 if shutil.which("git-lfs") or subprocess.run(
                     ["git", "lfs", "version"], capture_output=True, check=False
                 ).returncode == 0:
