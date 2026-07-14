@@ -21,6 +21,17 @@ jobs:
               core.setFailed('Independent review is only meaningful for a pull request.');
               return;
             }
+            const repository = await github.rest.repos.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            });
+            if (
+              repository.data.owner.type === 'User' &&
+              pull.user.login === repository.data.owner.login
+            ) {
+              core.notice('Solo-owner policy: the owner\'s manual merge is the merge approval.');
+              return;
+            }
             const reviews = await github.paginate(github.rest.pulls.listReviews, {
               owner: context.repo.owner,
               repo: context.repo.repo,

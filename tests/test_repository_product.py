@@ -85,6 +85,13 @@ class RepositoryLayoutTests(unittest.TestCase):
         text = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
         self.assertIn("GH_REPO: ${{ github.repository }}", text)
 
+    def test_independent_review_preserves_the_documented_solo_owner_policy(self) -> None:
+        text = (ROOT / ".github" / "workflows" / "independent-review.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Solo-owner policy", text)
+        self.assertIn("pull.user.login === repository.data.owner.login", text)
+
 
 class InitializeTests(unittest.TestCase):
     def test_init_populates_an_existing_empty_git_repository(self) -> None:
