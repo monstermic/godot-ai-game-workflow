@@ -159,12 +159,14 @@ def build_sync_plan(root: Path | str) -> dict[str, Any]:
         item = json.loads(path.read_text(encoding="utf-8"))
         checksum = fingerprint(item)
         marker = f"<!-- aigame:{item['id']}:{checksum} -->"
+        concept_refs = item.get("concept_refs", [])
         body = "\n".join(
             [
                 marker,
                 f"Work item: `{item['id']}`",
                 f"Milestone: `{item.get('milestone', 'unassigned')}`",
                 f"Risk: `{item.get('risk', 0)}`",
+                f"Concept: {', '.join(f'`{value}`' for value in concept_refs)}" if concept_refs else "Concept: `not linked`",
                 "",
                 "This issue mirrors canonical repository data. Edit intent through a pull request.",
             ]

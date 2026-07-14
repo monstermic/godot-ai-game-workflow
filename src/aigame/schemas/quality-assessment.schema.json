@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "QualityAssessment",
+  "type": "object",
+  "required": ["schema_version", "id", "revision", "status", "created_at", "updated_at", "input_fingerprint", "assessments"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "id": {"type": "string", "pattern": "^QAS-[0-9]{4}$"},
+    "revision": {"type": "integer", "minimum": 1},
+    "status": {"enum": ["complete", "rework", "superseded"]},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"},
+    "input_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "assessments": {"type": "array", "minItems": 1, "items": {"type": "object", "required": ["profile_id", "item_id", "disposition", "rationale", "scope_refs"], "properties": {"profile_id": {"type": "string", "minLength": 1}, "item_id": {"type": "string", "minLength": 1}, "disposition": {"enum": ["required", "optional", "not_applicable"]}, "rationale": {"type": "string", "minLength": 1}, "scope_refs": {"type": "array", "items": {"type": "string"}}}}}
+  },
+  "additionalProperties": true
+}

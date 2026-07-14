@@ -10,10 +10,15 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import aigame
+from aigame import __version__
 from aigame.cli import main
+from aigame.concept import next_concept_task
+from aigame.core import workflow_snapshot_checksum
 from aigame.generator import create_game
 from aigame.state import claim_work_item
 from aigame.upgrade import upgrade_workflow
+from aigame.validation import validate_project
 
 
 def git(root: Path, *args: str) -> str:
@@ -40,7 +45,7 @@ class ClaimTests(unittest.TestCase):
 
             claimed = claim_work_item(root, "WI-0001", apply=True)
             self.assertEqual(claimed["status"], "passed")
-            self.assertEqual(git(root, "branch", "--show-current"), "ai/WI-0001-complete-structured-game-discovery")
+            self.assertEqual(git(root, "branch", "--show-current"), "ai/WI-0001-create-complete-game-blueprint-from-user-prompt")
             state = json.loads(
                 (root / ".aigame" / "state" / "current.json").read_text(encoding="utf-8")
             )
@@ -74,8 +79,8 @@ class CommandTests(unittest.TestCase):
             root = Path(temporary) / "game"
             create_game(root, "Game", godot_version="4.7", apply=True)
             code, selected = self._run(["next", "--project", str(root), "--json"])
-            self.assertEqual(code, 0)
-            self.assertEqual(selected["work_item"]["id"], "WI-0001")
+            self.assertEqual(code, 3)
+            self.assertEqual(selected["gate"], "concept_start")
 
             code, packet = self._run(
                 ["context", "WI-0001", "--project", str(root), "--json"]
@@ -172,6 +177,14 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(repository["status"], "dry_run")
         self.assertTrue(repository["repository"]["is_template"])
 
+        code, game_repository = self._run(
+            ["repository", "configure-game", "monstermic/private-game", "--json"]
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(game_repository["status"], "dry_run")
+        self.assertNotIn("visibility", game_repository["repository"])
+        self.assertNotIn("is_template", game_repository["repository"])
+
         code, project = self._run(
             ["project", "configure", "monstermic/godot-ai-game-workflow", "--json"]
         )
@@ -181,20 +194,70 @@ class CommandTests(unittest.TestCase):
 
 
 class UpgradeTests(unittest.TestCase):
-    def test_upgrade_requires_apply_and_updates_pinned_values(self) -> None:
+    def test_upgrade_is_additive_and_installs_the_complete_current_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "game"
             create_game(root, "Game", godot_version="4.7", apply=True)
+            automation_path = root / ".aigame" / "automation.json"
+            automation_path.unlink()
+            concept_state_path = root / ".aigame" / "state" / "concept.json"
+            concept_state_path.unlink()
+            (root / ".aigame" / "schemas" / "automation-policy.schema.json").unlink()
+            (root / ".aigame" / "vendor" / "aigame" / "automation.py").unlink()
+            (root / ".aigame" / "vendor" / "aigame" / "schemas" / "automation-policy.schema.json").unlink()
+            staging_workflow = root / ".github" / "workflows" / "staging-merge.yml"
+            staging_workflow.unlink()
+            config_path = root / ".aigame" / "project.toml"
+            config_path.write_text(
+                config_path.read_text(encoding="utf-8").replace(
+                    f'workflow_version = "{__version__}"',
+                    'workflow_version = "1.1.0"',
+                ),
+                encoding="utf-8",
+            )
+            design_path = root / "docs" / "game_design.md"
+            design_path.write_text("# Owner design\n\nNever overwrite this.\n", encoding="utf-8")
             lock_path = root / ".aigame" / "workflow.lock.json"
             before = lock_path.read_text(encoding="utf-8")
-            preview = upgrade_workflow(root, "1.1.0", "a" * 40, "b" * 64, apply=False)
+            source_root = Path(aigame.__file__).resolve().parent
+            source_checksum = workflow_snapshot_checksum(source_root)
+            preview = upgrade_workflow(
+                root,
+                __version__,
+                "a" * 40,
+                source_checksum,
+                apply=False,
+            )
             self.assertEqual(preview["status"], "dry_run")
+            self.assertIn(".aigame/automation.json", preview["install"])
             self.assertEqual(lock_path.read_text(encoding="utf-8"), before)
-            result = upgrade_workflow(root, "1.1.0", "a" * 40, "b" * 64, apply=True)
+            result = upgrade_workflow(
+                root,
+                __version__,
+                "a" * 40,
+                source_checksum,
+                apply=True,
+            )
             self.assertEqual(result["status"], "passed")
             lock = json.loads(lock_path.read_text(encoding="utf-8"))
-            self.assertEqual(lock["workflow_version"], "1.1.0")
+            self.assertEqual(lock["workflow_version"], __version__)
             self.assertEqual(lock["source_commit"], "a" * 40)
+            self.assertEqual(lock["source_sha256"], source_checksum)
+            self.assertTrue(automation_path.is_file())
+            self.assertTrue(concept_state_path.is_file())
+            self.assertEqual(next_concept_task(root)["gate"], "concept_start")
+            self.assertTrue((root / ".aigame" / "schemas" / "automation-policy.schema.json").is_file())
+            self.assertTrue((root / ".aigame" / "vendor" / "aigame" / "automation.py").is_file())
+            self.assertTrue(staging_workflow.is_file())
+            self.assertIn(
+                f'workflow_version = "{__version__}"',
+                config_path.read_text(encoding="utf-8"),
+            )
+            self.assertEqual(
+                design_path.read_text(encoding="utf-8"),
+                "# Owner design\n\nNever overwrite this.\n",
+            )
+            self.assertEqual(validate_project(root)["status"], "passed")
 
 
 if __name__ == "__main__":

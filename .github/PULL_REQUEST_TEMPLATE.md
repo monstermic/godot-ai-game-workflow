@@ -13,6 +13,6 @@ WI-
 - [ ] Human playtest is attached or not applicable
 - [ ] Save, performance, accessibility, and license impacts are documented
 
-## Human gate
+## Integration gate
 
-Only the repository owner merges after all required checks pass.
+Human-gated projects are merged by the owner. In AI-staging projects, `aigame staging merge` returns an exact SHA-bound approval comment. Only the authenticated repository owner may post that comment; the workflow then revalidates checks and sets the required Actions-App-bound status before squash auto-merge.

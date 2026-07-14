@@ -1,0 +1,3 @@
+# Pitching task
+
+Using only the returned concept task context, first extract the audience, genre tags, known facts, labeled assumptions, contradictions, non-goals, and risks into the result's `intake` object. Then produce exactly three materially different, feasible pitches. Each pitch must include player fantasy, unique identity, core loop, bounded scope, explicit beginning, explicit ending, risks, and 1-5 scores for identity, coherence, core loop, scope feasibility, and player fit. Recommend one with rationale but do not select it for the human. Return JSON containing `intake`, `pitches`, `recommended_index`, and `recommendation_rationale`; each pitch must match `concept-pitch.schema.json` after record metadata is added.

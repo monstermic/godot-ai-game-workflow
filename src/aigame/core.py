@@ -58,6 +58,8 @@ def workflow_snapshot_checksum(root: Path | str) -> str:
         entries[path.name] = path.read_text(encoding="utf-8").rstrip() + "\n"
     for path in sorted((package / "schemas").glob("*.json")):
         entries[f"schemas/{path.name}"] = path.read_text(encoding="utf-8").rstrip() + "\n"
+    for path in sorted((package / "profiles").glob("*.json")):
+        entries[f"profiles/{path.name}"] = path.read_text(encoding="utf-8").rstrip() + "\n"
     return fingerprint(entries)
 
 
@@ -75,9 +77,19 @@ def transition(item: dict[str, Any], target: str) -> dict[str, Any]:
 
 
 def choose_next(
-    items: Iterable[dict[str, Any]], capabilities: set[str]
+    items: Iterable[dict[str, Any]],
+    capabilities: set[str],
+    *,
+    allow_red_unknowns: bool = False,
 ) -> dict[str, Any]:
-    ready = [copy.deepcopy(item) for item in items if item.get("status") == "ready"]
+    candidates = [copy.deepcopy(item) for item in items]
+    statuses = {str(item.get("id")): item.get("status") for item in candidates}
+    ready = [
+        item
+        for item in candidates
+        if item.get("status") == "ready"
+        and all(statuses.get(str(dependency)) == "done" for dependency in item.get("dependencies", []))
+    ]
     if not ready:
         raise HumanRequired("No ready work item is available")
     ready.sort(
@@ -96,7 +108,7 @@ def choose_next(
         for unknown in selected.get("unknowns", [])
         if str(unknown.get("level", "")).lower() == "red"
     ]
-    if red_unknowns:
+    if red_unknowns and not allow_red_unknowns:
         raise HumanRequired(f"{selected['id']} has unresolved red unknowns")
     required = set(selected.get("required_capabilities", []))
     missing = required - capabilities

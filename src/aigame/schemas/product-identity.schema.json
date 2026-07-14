@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ProductIdentity",
+  "type": "object",
+  "required": ["schema_version", "id", "revision", "status", "created_at", "updated_at", "input_fingerprint", "title", "subtitle", "short_description", "long_description", "package_slug", "executable_name", "display_name", "save_namespace", "edition", "branding_vocabulary", "naming_rules", "store_metadata", "approval_id"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "id": {"type": "string", "pattern": "^PRD-[0-9]{4}$"},
+    "revision": {"type": "integer", "minimum": 1},
+    "status": {"enum": ["approved", "rework", "superseded"]},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"},
+    "input_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "title": {"type": "string", "minLength": 1},
+    "subtitle": {"type": "string"},
+    "short_description": {"type": "string", "minLength": 1},
+    "long_description": {"type": "string", "minLength": 1},
+    "package_slug": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "executable_name": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
+    "display_name": {"type": "string", "minLength": 1},
+    "save_namespace": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+$"},
+    "edition": {"type": "string", "minLength": 1},
+    "branding_vocabulary": {"type": "array", "items": {"type": "string"}, "minItems": 1, "uniqueItems": true},
+    "naming_rules": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "store_metadata": {"type": "object"},
+    "approval_id": {"type": "string", "pattern": "^APR-[0-9]{4}$"}
+  },
+  "additionalProperties": true
+}

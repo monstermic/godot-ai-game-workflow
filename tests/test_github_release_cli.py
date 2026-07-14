@@ -23,6 +23,13 @@ class GitHubSyncTests(unittest.TestCase):
             self.assertEqual(first, second)
             self.assertIn("<!-- aigame:WI-0001:", first["issues"][0]["body"])
 
+            item_path = root / "work" / "items" / "WI-0001.json"
+            item = json.loads(item_path.read_text(encoding="utf-8"))
+            item["concept_refs"] = ["MEC-0001", "CNT-0001", "GDD-0001"]
+            item_path.write_text(json.dumps(item), encoding="utf-8")
+            linked = build_sync_plan(root)
+            self.assertIn("Concept: `MEC-0001`, `CNT-0001`, `GDD-0001`", linked["issues"][0]["body"])
+
     def test_issue_intake_is_data_not_an_executable_command(self) -> None:
         proposal = intake_to_proposal("Add dash; Remove-Item -Recurse C:\\", "Player wants mobility")
         self.assertEqual(proposal["status"], "draft")

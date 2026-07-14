@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AutomationPolicy",
+  "type": "object",
+  "required": ["schema_version", "id", "revision", "status", "created_at", "updated_at", "input_fingerprint", "mode", "decision_authority", "permission_policy", "auto_approved_operations", "integration_branch", "auto_merge_staging", "protected_gates"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "id": {"const": "AUT-0001"},
+    "revision": {"type": "integer", "minimum": 1},
+    "status": {"const": "current"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"},
+    "input_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "mode": {"enum": ["human_gated", "ai_staging"]},
+    "decision_authority": {"enum": ["human", "agent"]},
+    "permission_policy": {"enum": ["ask", "auto_approve_project_operations"]},
+    "auto_approved_operations": {
+      "type": "array",
+      "items": {"enum": ["creative_decisions", "project_file_writes", "allowlisted_shell", "tests", "git_branch", "git_commit", "pull_request_prepare"]},
+      "uniqueItems": true
+    },
+    "integration_branch": {"const": "staging"},
+    "auto_merge_staging": {"type": "boolean"},
+    "protected_gates": {
+      "type": "array",
+      "items": {"enum": ["independent_review", "staging_owner_approval", "production", "release", "rollback"]},
+      "minItems": 5,
+      "maxItems": 5,
+      "uniqueItems": true,
+      "allOf": [
+        {"contains": {"const": "independent_review"}},
+        {"contains": {"const": "staging_owner_approval"}},
+        {"contains": {"const": "production"}},
+        {"contains": {"const": "release"}},
+        {"contains": {"const": "rollback"}}
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"mode": {"const": "ai_staging"}}},
+      "then": {
+        "properties": {
+          "decision_authority": {"const": "agent"},
+          "permission_policy": {"const": "auto_approve_project_operations"},
+          "auto_approved_operations": {"const": ["creative_decisions", "project_file_writes", "allowlisted_shell", "tests", "git_branch", "git_commit", "pull_request_prepare"]},
+          "auto_merge_staging": {"const": true}
+        }
+      },
+      "else": {
+        "properties": {
+          "decision_authority": {"const": "human"},
+          "permission_policy": {"const": "ask"},
+          "auto_approved_operations": {"const": []},
+          "auto_merge_staging": {"const": false}
+        }
+      }
+    }
+  ],
+  "additionalProperties": false
+}

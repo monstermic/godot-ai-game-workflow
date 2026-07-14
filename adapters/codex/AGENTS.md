@@ -1,3 +1,3 @@
 # Codex adapter
 
-The target repository’s root `AGENTS.md` is authoritative. Use planning for ambiguous intent, TDD for implementation, fresh verification before completion, and GitHub branches/PRs for delivery. Never bypass human merge or release gates.
+The target repository's root `AGENTS.md` and `.aigame/automation.json` are authoritative. Use the `build-game-concept` skill before implementation. In `human_gated` mode stop for concept approvals; in `ai_staging` mode make those decisions, retain the generated agent approvals, and continue. Use TDD, fresh verification, and PRs targeting `staging`. Auto-approve ordinary project-local operations, but use `aigame staging merge` only to obtain the bound approval comment. Stop for the authenticated repository owner to post it; never post it as the agent. Never bypass independent review, production, release, rollback, secrets, paid services, or destructive external changes.

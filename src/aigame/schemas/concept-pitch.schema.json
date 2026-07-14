@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ConceptPitch",
+  "type": "object",
+  "required": ["schema_version", "id", "revision", "status", "created_at", "updated_at", "input_fingerprint", "title", "player_fantasy", "unique_identity", "core_loop", "scope_summary", "beginning", "ending", "feasibility", "risks", "scores", "recommended"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "id": {"type": "string", "pattern": "^PIT-[0-9]{4}$"},
+    "revision": {"type": "integer", "minimum": 1},
+    "status": {"enum": ["proposed", "selected", "rejected", "superseded"]},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"},
+    "input_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "title": {"type": "string", "minLength": 1},
+    "player_fantasy": {"type": "string", "minLength": 1},
+    "unique_identity": {"type": "string", "minLength": 1},
+    "core_loop": {"type": "string", "minLength": 1},
+    "scope_summary": {"type": "string", "minLength": 1},
+    "beginning": {"type": "string", "minLength": 1},
+    "ending": {"type": "string", "minLength": 1},
+    "feasibility": {"type": "string", "minLength": 1},
+    "risks": {"type": "array", "items": {"type": "string"}},
+    "scores": {"type": "object", "required": ["identity", "coherence", "core_loop", "scope_feasibility", "player_fit"], "additionalProperties": {"type": "integer", "minimum": 1, "maximum": 5}},
+    "recommended": {"type": "boolean"},
+    "recommendation_rationale": {"type": "string"},
+    "approval_id": {"type": "string", "pattern": "^APR-[0-9]{4}$"}
+  },
+  "additionalProperties": true
+}
