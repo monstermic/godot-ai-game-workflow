@@ -10,6 +10,7 @@ from typing import Any
 from jsonschema import Draft202012Validator
 
 from .core import fingerprint, workflow_snapshot_checksum
+from .concept import validate_concept
 
 
 COMMON_FIELDS = {
@@ -72,6 +73,7 @@ def validate_project(root: Path | str) -> dict[str, Any]:
     required_files = [
         project / "AGENTS.md",
         project / ".aigame" / "project.toml",
+        project / ".aigame" / "automation.json",
         project / ".aigame" / "workflow.lock.json",
         project / "project.godot",
         project / "assets" / "asset-manifest.json",
@@ -91,6 +93,20 @@ def validate_project(root: Path | str) -> dict[str, Any]:
                 f"ProjectConfig: {message}"
                 for message in _schema_errors(config, "project-config.schema.json")
             )
+
+    automation_path = project / ".aigame" / "automation.json"
+    if automation_path.is_file():
+        automation = _load(automation_path, errors)
+        if automation is not None:
+            errors.extend(
+                f"AutomationPolicy: {message}"
+                for message in _schema_errors(automation, "automation-policy.schema.json")
+            )
+            material = {
+                key: value for key, value in automation.items() if key != "input_fingerprint"
+            }
+            if automation.get("input_fingerprint") != fingerprint(material):
+                errors.append("AutomationPolicy: input fingerprint does not match current content")
 
     lock_path = project / ".aigame" / "workflow.lock.json"
     if lock_path.is_file():
@@ -199,6 +215,17 @@ def validate_project(root: Path | str) -> dict[str, Any]:
             ):
                 errors.append(f"{asset_id}: generated asset provenance is incomplete")
 
+    concept_state_path = project / ".aigame" / "state" / "concept.json"
+    concept_report = {"status": "passed", "errors": [], "counts": {}}
+    if concept_state_path.is_file():
+        concept_state = _load(concept_state_path, errors)
+        require_final = bool(
+            concept_state
+            and concept_state.get("status") in {"blueprint_approval", "finalized"}
+        )
+        concept_report = validate_concept(project, require_final=require_final)
+        errors.extend(f"Concept: {message}" for message in concept_report.get("errors", []))
+
     return {
         "schema_version": "1.0",
         "status": "failed" if errors else "passed",
@@ -211,5 +238,10 @@ def validate_project(root: Path | str) -> dict[str, Any]:
             "experiments": len(experiments),
             "approvals": len(approvals),
             "evidence": len(evidence),
+            "concept_records": sum(
+                count
+                for group, count in concept_report.get("counts", {}).items()
+                if group != "tasks"
+            ),
         },
     }

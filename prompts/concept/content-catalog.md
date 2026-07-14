@@ -1,0 +1,3 @@
+# Content catalog task
+
+Enumerate every authored launch character, class, enemy, boss, item, weapon, ability, upgrade, stage, biome, location, currency, resource, status effect, encounter, achievement, ending, and other player-visible entry selected by scope. Give each a stable `CNT-` ID, final canonical/display name, localization key, role, purpose, behavior, mechanics, data, acquisition rules, relationships, assets, milestone, DoD links, launch status, and acceptance/playtest criteria. Also return a complete `NAM-` registry. Procedural outcomes may be combinatorial, but every generator, template, pool, affix, modifier, weight, constraint, and seed rule must be named and specified.

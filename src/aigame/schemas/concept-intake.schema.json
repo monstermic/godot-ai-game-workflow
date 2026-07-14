@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ConceptIntake",
+  "type": "object",
+  "required": ["schema_version", "id", "revision", "status", "created_at", "updated_at", "input_fingerprint", "prompt", "constraints", "audience", "genre_tags", "facts", "assumptions", "contradictions", "non_goals", "risks", "quality_profiles", "source_documents"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "id": {"type": "string", "pattern": "^CIN-[0-9]{4}$"},
+    "revision": {"type": "integer", "minimum": 1},
+    "status": {"enum": ["accepted", "rework", "superseded"]},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"},
+    "input_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "prompt": {"type": "string", "minLength": 1, "maxLength": 20000},
+    "constraints": {"type": "array", "items": {"type": "string"}},
+    "audience": {"type": "string", "minLength": 1},
+    "genre_tags": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "facts": {"type": "array", "items": {"type": "string"}},
+    "assumptions": {"type": "array", "items": {"type": "object", "required": ["text", "risk"], "properties": {"text": {"type": "string", "minLength": 1}, "risk": {"enum": ["green", "amber", "red"]}}}},
+    "contradictions": {"type": "array", "items": {"type": "string"}},
+    "non_goals": {"type": "array", "items": {"type": "string"}},
+    "risks": {"type": "array", "items": {"type": "object", "required": ["text", "level"], "properties": {"text": {"type": "string", "minLength": 1}, "level": {"enum": ["green", "amber", "red"]}}}},
+    "quality_profiles": {"type": "array", "items": {"type": "string"}, "minItems": 1, "uniqueItems": true},
+    "source_documents": {"type": "array", "items": {"type": "object", "required": ["path", "sha256"], "properties": {"path": {"type": "string", "minLength": 1}, "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}}}
+  },
+  "additionalProperties": true
+}

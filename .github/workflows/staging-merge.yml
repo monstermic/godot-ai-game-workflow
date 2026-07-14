@@ -1,0 +1,76 @@
+name: Authenticated Staging Merge
+
+on:
+  issue_comment:
+    types: [created]
+  workflow_call:
+    inputs:
+      pull-request:
+        type: number
+        required: true
+      actor:
+        type: string
+        required: true
+      comment-body:
+        type: string
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+  statuses: write
+
+jobs:
+  staging-merge:
+    name: staging-merge
+    if: >-
+      github.event_name == 'workflow_call' ||
+      (github.event.issue.pull_request && startsWith(github.event.comment.body, '/aigame merge staging '))
+    runs-on: ubuntu-latest
+    concurrency:
+      group: staging-merge-${{ inputs['pull-request'] || github.event.issue.number }}
+      cancel-in-progress: false
+    steps:
+      - name: Authenticate owner approval and enable squash auto-merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ inputs['pull-request'] || github.event.issue.number }}
+          APPROVAL_ACTOR: ${{ inputs.actor || github.actor }}
+          COMMENT_BODY: ${{ inputs['comment-body'] || github.event.comment.body }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$PR_NUMBER" =~ ^[0-9]+$ ]]
+          OWNER_LOGIN="$(gh repo view --json owner --jq .owner.login)"
+          test "$APPROVAL_ACTOR" = "$OWNER_LOGIN"
+          test "$APPROVAL_ACTOR" = "$GITHUB_ACTOR"
+          read -r command action branch head_field scope_field extra <<< "$COMMENT_BODY"
+          test "$command" = "/aigame"
+          test "$action" = "merge"
+          test "$branch" = "staging"
+          test -z "${extra:-}"
+          HEAD_SHA="${head_field#head=}"
+          SCOPE_HASH="${scope_field#scope=}"
+          [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$SCOPE_HASH" =~ ^[0-9a-f]{64}$ ]]
+          test "$(gh pr view "$PR_NUMBER" --json state --jq .state)" = "OPEN"
+          test "$(gh pr view "$PR_NUMBER" --json isDraft --jq .isDraft)" = "false"
+          test "$(gh pr view "$PR_NUMBER" --json baseRefName --jq .baseRefName)" = "staging"
+          test "$(gh pr view "$PR_NUMBER" --json headRefOid --jq .headRefOid)" = "$HEAD_SHA"
+          for required in \
+            "contract / contract" \
+            "godot-quality / godot-quality" \
+            "asset-provenance / asset-provenance" \
+            "independent-review / independent-review"
+          do
+            result="$(gh pr view "$PR_NUMBER" --json statusCheckRollup --jq \
+              ".statusCheckRollup[] | select((.name // .context) == \"$required\") | (.conclusion // .state)")"
+            test "$result" = "SUCCESS" -o "$result" = "NEUTRAL"
+          done
+          gh api --method POST "repos/$GH_REPO/statuses/$HEAD_SHA" \
+            -f state=success \
+            -f context=aigame-staging-owner-approval \
+            -f description="Authenticated repository owner approved staging merge"
+          gh pr checks "$PR_NUMBER" --required
+          gh pr merge "$PR_NUMBER" --auto --squash --delete-branch --match-head-commit "$HEAD_SHA"

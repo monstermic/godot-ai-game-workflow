@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 import unittest
 
 from aigame.core import (
@@ -23,6 +24,7 @@ def work_item(
     estimate: int = 1,
     required_capabilities: list[str] | None = None,
     unknowns: list[dict[str, str]] | None = None,
+    dependencies: list[str] | None = None,
 ) -> dict:
     return {
         "schema_version": "1.0",
@@ -36,7 +38,7 @@ def work_item(
         "estimate": estimate,
         "required_capabilities": required_capabilities or [],
         "unknowns": unknowns or [],
-        "dependencies": [],
+        "dependencies": dependencies or [],
     }
 
 
@@ -95,6 +97,39 @@ class SchedulerTests(unittest.TestCase):
         with self.assertRaises(MissingCapability) as context:
             choose_next([item], capabilities={"git"})
         self.assertEqual(context.exception.missing, ["godot"])
+
+    def test_ready_item_is_not_eligible_until_all_dependencies_are_done(self) -> None:
+        selected = choose_next(
+            [
+                work_item("WI-0001", status="implementing"),
+                work_item("WI-0002", risk=5, dependencies=["WI-0001"]),
+                work_item("WI-0003"),
+            ],
+            capabilities=set(),
+        )
+        self.assertEqual(selected["id"], "WI-0003")
+
+        selected = choose_next(
+            [
+                work_item("WI-0001", status="done"),
+                work_item("WI-0002", risk=5, dependencies=["WI-0001"]),
+                work_item("WI-0003"),
+            ],
+            capabilities=set(),
+        )
+        self.assertEqual(selected["id"], "WI-0002")
+
+    def test_selection_is_invariant_to_input_order(self) -> None:
+        items = [
+            work_item("WI-0003", risk=1),
+            work_item("WI-0002", risk=5, dependencies=["WI-0001"]),
+            work_item("WI-0001", status="done"),
+        ]
+        selections = {
+            choose_next(order, capabilities=set())["id"]
+            for order in itertools.permutations(items)
+        }
+        self.assertEqual(selections, {"WI-0002"})
 
 
 if __name__ == "__main__":

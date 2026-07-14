@@ -12,6 +12,12 @@ REQUIRED_CHECKS = [
     "asset-provenance / asset-provenance",
     "independent-review / independent-review",
 ]
+STAGING_APPROVAL_CHECK = "aigame-staging-owner-approval"
+STAGING_REQUIRED_CHECKS = [*REQUIRED_CHECKS, STAGING_APPROVAL_CHECK]
+GITHUB_ACTIONS_APP_ID = 15368
+REUSABLE_WORKFLOW_PATTERN = (
+    "monstermic/godot-ai-game-workflow/.github/workflows/*@*"
+)
 
 
 def build_repository_plan(repository: str) -> dict[str, Any]:
@@ -29,6 +35,7 @@ def build_repository_plan(repository: str) -> dict[str, Any]:
             "allow_squash_merge": True,
             "allow_merge_commit": False,
             "allow_rebase_merge": False,
+            "allow_auto_merge": True,
             "delete_branch_on_merge": True,
         },
         "labels": [
@@ -65,6 +72,7 @@ def build_repository_plan(repository: str) -> dict[str, Any]:
             "allowed_actions": "selected",
             "github_owned_allowed": True,
             "verified_allowed": False,
+            "patterns_allowed": [REUSABLE_WORKFLOW_PATTERN],
             "default_workflow_permissions": "read",
             "can_approve_pull_request_reviews": False,
         },
@@ -86,7 +94,32 @@ def build_repository_plan(repository: str) -> dict[str, Any]:
             "block_deletion": True,
             "block_force_push": True,
         },
+        "staging_ruleset": {
+            "name": "staging-protection",
+            "target": "branch",
+            "enforcement": "active",
+            "include": ["refs/heads/staging"],
+            "allow_branch_creation": True,
+            "required_checks": STAGING_REQUIRED_CHECKS,
+            "required_check_integrations": {
+                STAGING_APPROVAL_CHECK: GITHUB_ACTIONS_APP_ID,
+            },
+            "require_pull_request": True,
+            "block_deletion": True,
+            "block_force_push": True,
+        },
     }
+
+
+def build_game_repository_plan(repository: str) -> dict[str, Any]:
+    plan = build_repository_plan(repository)
+    plan["repository"] = {
+        key: value
+        for key, value in plan["repository"].items()
+        if key not in {"visibility", "is_template"}
+    }
+    plan["repository_name"] = repository
+    return plan
 
 
 class GhRepositoryClient:
@@ -130,7 +163,12 @@ class GhRepositoryClient:
             "name": ruleset["name"],
             "target": "branch",
             "enforcement": "active",
-            "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
+            "conditions": {
+                "ref_name": {
+                    "include": ruleset.get("include", ["~DEFAULT_BRANCH"]),
+                    "exclude": [],
+                }
+            },
             "rules": [
                 {"type": "deletion"},
                 {"type": "non_fast_forward"},
@@ -148,9 +186,23 @@ class GhRepositoryClient:
                     "type": "required_status_checks",
                     "parameters": {
                         "strict_required_status_checks_policy": True,
-                        "do_not_enforce_on_create": False,
+                        "do_not_enforce_on_create": bool(
+                            ruleset.get("allow_branch_creation", False)
+                        ),
                         "required_status_checks": [
-                            {"context": check} for check in ruleset["required_checks"]
+                            {
+                                "context": check,
+                                **(
+                                    {"integration_id": integration_id}
+                                    if (
+                                        integration_id := ruleset.get(
+                                            "required_check_integrations", {}
+                                        ).get(check)
+                                    )
+                                    else {}
+                                ),
+                            }
+                            for check in ruleset["required_checks"]
                         ],
                     },
                 },
@@ -173,7 +225,7 @@ class GhRepositoryClient:
             {
                 "github_owned_allowed": policy["github_owned_allowed"],
                 "verified_allowed": policy["verified_allowed"],
-                "patterns_allowed": [],
+                "patterns_allowed": policy["patterns_allowed"],
             },
         )
         self._api(
@@ -220,9 +272,39 @@ def configure_repository(
     github.enable_security_features()
     github.ensure_environment(plan["environment"])
     github.ensure_ruleset(plan["ruleset"])
+    github.ensure_ruleset(plan["staging_ruleset"])
     return {
         "schema_version": "1.0",
         "status": "passed",
         "repository_name": repository,
         "required_checks": plan["ruleset"]["required_checks"],
+        "staging_required_checks": plan["staging_ruleset"]["required_checks"],
+    }
+
+
+def configure_game_repository(
+    repository: str,
+    *,
+    client: Any | None = None,
+    cwd: Path | str = Path.cwd(),
+    apply: bool = False,
+) -> dict[str, Any]:
+    plan = build_game_repository_plan(repository)
+    if not apply:
+        return {**plan, "status": "dry_run"}
+    github = client or GhRepositoryClient(repository, cwd=cwd)
+    github.edit_repository(plan["repository"])
+    github.ensure_labels(plan["labels"])
+    github.configure_actions(plan["actions"])
+    github.enable_security_features()
+    github.ensure_environment(plan["environment"])
+    github.ensure_ruleset(plan["ruleset"])
+    github.ensure_ruleset(plan["staging_ruleset"])
+    return {
+        "schema_version": "1.0",
+        "status": "passed",
+        "repository_name": repository,
+        "required_checks": plan["ruleset"]["required_checks"],
+        "staging_required_checks": plan["staging_ruleset"]["required_checks"],
+        "environments": ["production"],
     }

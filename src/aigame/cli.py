@@ -10,24 +10,53 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
+from .automation import (
+    get_automation_policy,
+    initialize_staging,
+    is_ai_staging,
+    prepare_staging_merge,
+    set_automation_mode,
+)
 from .assets import build_lfs_plan
+from .concept import (
+    finalize_concept,
+    next_concept_task,
+    render_concept,
+    revise_concept,
+    select_concept_pitch,
+    start_concept,
+    submit_concept_task,
+    validate_concept,
+)
 from .context import build_context
-from .core import HumanRequired, MissingCapability, WorkflowError, choose_next
+from .core import (
+    HumanRequired,
+    MissingCapability,
+    WorkflowError,
+    choose_next,
+    workflow_snapshot_checksum,
+)
 from .generator import create_game, initialize_game
 from .github import build_sync_plan, sync_github
 from .release import ApprovalRequired, prepare_release_candidate, promote_release
 from .project import configure_project
-from .repository import configure_repository
+from .repository import configure_game_repository, configure_repository
 from .state import checkpoint, claim_work_item
 from .upgrade import upgrade_workflow
 from .validation import validate_project
 
 
-def _doctor() -> dict[str, Any]:
+def _doctor(project: Path | str | None = None) -> dict[str, Any]:
+    root = Path(project).resolve() if project is not None else Path.cwd().resolve()
+    policy_path = root / ".aigame" / "automation.json"
+    policy = get_automation_policy(root) if policy_path.is_file() else None
     return {
         "schema_version": "1.0",
         "status": "passed",
         "workflow_version": __version__,
+        "workflow_source_sha256": workflow_snapshot_checksum(Path(__file__).resolve().parent),
+        "automation_mode": policy.get("mode") if policy else None,
+        "integration_branch": policy.get("integration_branch") if policy else None,
         "capabilities": {
             "filesystem": True,
             "shell": True,
@@ -42,6 +71,7 @@ def _doctor() -> dict[str, Any]:
         },
         "python": sys.version.split()[0],
         "cwd": str(Path.cwd()),
+        "project": str(root),
     }
 
 
@@ -138,6 +168,14 @@ def build_parser() -> argparse.ArgumentParser:
     repository_configure.add_argument("repository")
     repository_configure.add_argument("--apply", action="store_true")
     repository_configure.add_argument("--json", action="store_true", dest="as_json")
+    repository_configure_game = repository_sub.add_parser(
+        "configure-game",
+        help="Configure a generated private game repository without changing its visibility",
+    )
+    repository_configure_game.add_argument("repository")
+    repository_configure_game.add_argument("--project", type=Path, default=Path.cwd())
+    repository_configure_game.add_argument("--apply", action="store_true")
+    repository_configure_game.add_argument("--json", action="store_true", dest="as_json")
 
     project = subparsers.add_parser("project", help="Configure a GitHub Project v2 board")
     project_sub = project.add_subparsers(dest="project_command", required=True)
@@ -145,6 +183,89 @@ def build_parser() -> argparse.ArgumentParser:
     project_configure.add_argument("repository")
     project_configure.add_argument("--apply", action="store_true")
     project_configure.add_argument("--json", action="store_true", dest="as_json")
+
+    concept = subparsers.add_parser("concept", help="Build a complete game blueprint from a prompt")
+    concept_sub = concept.add_subparsers(dest="concept_command", required=True)
+
+    concept_start = concept_sub.add_parser("start", help="Create the canonical concept intake")
+    prompt_group = concept_start.add_mutually_exclusive_group(required=True)
+    prompt_group.add_argument("--prompt")
+    prompt_group.add_argument("--prompt-file", type=Path)
+    concept_start.add_argument("--profile", action="append", default=[])
+    concept_start.add_argument("--from-existing-docs", action="store_true")
+    concept_start.add_argument("--project", type=Path, default=Path.cwd())
+    concept_start.add_argument("--apply", action="store_true")
+    concept_start.add_argument("--json", action="store_true", dest="as_json")
+
+    concept_next = concept_sub.add_parser("next", help="Return the next resumable concept task")
+    concept_next.add_argument("--project", type=Path, default=Path.cwd())
+    concept_next.add_argument("--json", action="store_true", dest="as_json")
+
+    concept_submit = concept_sub.add_parser("submit", help="Validate and checkpoint a concept task result")
+    concept_submit.add_argument("task_id")
+    concept_submit.add_argument("--result", type=Path, required=True)
+    concept_submit.add_argument("--approval", type=Path)
+    concept_submit.add_argument("--project", type=Path, default=Path.cwd())
+    concept_submit.add_argument("--apply", action="store_true")
+    concept_submit.add_argument("--json", action="store_true", dest="as_json")
+
+    concept_select = concept_sub.add_parser("select", help="Select one approved concept pitch")
+    concept_select.add_argument("pitch_id")
+    concept_select.add_argument("--approval", type=Path)
+    concept_select.add_argument("--project", type=Path, default=Path.cwd())
+    concept_select.add_argument("--apply", action="store_true")
+    concept_select.add_argument("--json", action="store_true", dest="as_json")
+
+    concept_validate = concept_sub.add_parser("validate", help="Validate concept contracts and traceability")
+    concept_validate.add_argument("--project", type=Path, default=Path.cwd())
+    concept_validate.add_argument("--final", action="store_true", dest="require_final")
+    concept_validate.add_argument("--json", action="store_true", dest="as_json")
+
+    concept_render = concept_sub.add_parser("render", help="Render deterministic human-readable blueprint documents")
+    concept_render.add_argument("--project", type=Path, default=Path.cwd())
+    render_mode = concept_render.add_mutually_exclusive_group()
+    render_mode.add_argument("--check", action="store_true")
+    render_mode.add_argument("--apply", action="store_true")
+    concept_render.add_argument("--json", action="store_true", dest="as_json")
+
+    concept_finalize = concept_sub.add_parser("finalize", help="Approve and materialize the complete blueprint")
+    concept_finalize.add_argument("--approval", type=Path)
+    concept_finalize.add_argument("--project", type=Path, default=Path.cwd())
+    concept_finalize.add_argument("--apply", action="store_true")
+    concept_finalize.add_argument("--json", action="store_true", dest="as_json")
+
+    concept_revise = concept_sub.add_parser("revise", help="Invalidate approvals and open bounded blueprint rework")
+    concept_revise.add_argument("--change-file", type=Path, required=True)
+    concept_revise.add_argument("--project", type=Path, default=Path.cwd())
+    concept_revise.add_argument("--apply", action="store_true")
+    concept_revise.add_argument("--json", action="store_true", dest="as_json")
+
+    mode = subparsers.add_parser("mode", help="Inspect or change the project automation mode")
+    mode_sub = mode.add_subparsers(dest="mode_command", required=True)
+    mode_show = mode_sub.add_parser("show", help="Show the current automation policy")
+    mode_show.add_argument("--project", type=Path, default=Path.cwd())
+    mode_show.add_argument("--json", action="store_true", dest="as_json")
+    mode_set = mode_sub.add_parser("set", help="Set human-gated or AI staging mode")
+    mode_set.add_argument("mode", choices=["human-gated", "ai-staging"])
+    mode_set.add_argument("--confirm")
+    mode_set.add_argument("--project", type=Path, default=Path.cwd())
+    mode_set.add_argument("--apply", action="store_true")
+    mode_set.add_argument("--json", action="store_true", dest="as_json")
+
+    staging = subparsers.add_parser("staging", help="Integrate verified pull requests into staging")
+    staging_sub = staging.add_subparsers(dest="staging_command", required=True)
+    staging_init = staging_sub.add_parser("init", help="Create staging from the default branch")
+    staging_init.add_argument("--project", type=Path, default=Path.cwd())
+    staging_init.add_argument("--apply", action="store_true")
+    staging_init.add_argument("--json", action="store_true", dest="as_json")
+    staging_merge = staging_sub.add_parser(
+        "merge",
+        help="Return the checked, SHA-bound staging approval comment for the repository owner",
+    )
+    staging_merge.add_argument("pull_request", type=int)
+    staging_merge.add_argument("--project", type=Path, default=Path.cwd())
+    staging_merge.add_argument("--apply", action="store_true")
+    staging_merge.add_argument("--json", action="store_true", dest="as_json")
     return parser
 
 
@@ -152,7 +273,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         if args.command == "doctor":
-            payload = _doctor()
+            payload = _doctor(args.project)
         elif args.command == "new":
             payload = create_game(
                 args.destination, args.name, godot_version=args.godot_version, apply=args.apply
@@ -239,6 +360,11 @@ def main(argv: list[str] | None = None) -> int:
                     if create.returncode != 0:
                         raise RuntimeError(create.stderr.strip() or "Unable to create GitHub repository")
                     payload["github"]["url"] = create.stdout.strip()
+                    payload["github"]["policy"] = configure_game_repository(
+                        args.github,
+                        cwd=args.destination,
+                        apply=True,
+                    )
                     payload["github"]["project"] = configure_project(
                         args.github, apply=True
                     )
@@ -247,12 +373,28 @@ def main(argv: list[str] | None = None) -> int:
                 args.project, args.name, godot_version=args.godot_version, apply=args.apply
             )
         elif args.command == "next":
-            capabilities = {name for name, enabled in _doctor()["capabilities"].items() if enabled}
-            items = [
-                json.loads(path.read_text(encoding="utf-8"))
-                for path in sorted((args.project / "work" / "items").glob("WI-*.json"))
-            ]
-            payload = {"schema_version": "1.0", "status": "passed", "work_item": choose_next(items, capabilities)}
+            concept_payload = next_concept_task(args.project)
+            if concept_payload.get("status") != "finalized":
+                payload = concept_payload
+            else:
+                capabilities = {
+                    name
+                    for name, enabled in _doctor(args.project)["capabilities"].items()
+                    if enabled
+                }
+                items = [
+                    json.loads(path.read_text(encoding="utf-8"))
+                    for path in sorted((args.project / "work" / "items").glob("WI-*.json"))
+                ]
+                payload = {
+                    "schema_version": "1.0",
+                    "status": "passed",
+                    "work_item": choose_next(
+                        items,
+                        capabilities,
+                        allow_red_unknowns=is_ai_staging(args.project),
+                    ),
+                }
         elif args.command == "context":
             payload = build_context(args.project, args.work_item_id)
         elif args.command == "claim":
@@ -281,8 +423,68 @@ def main(argv: list[str] | None = None) -> int:
             )
         elif args.command == "repository" and args.repository_command == "configure":
             payload = configure_repository(args.repository, apply=args.apply)
+        elif args.command == "repository" and args.repository_command == "configure-game":
+            payload = configure_game_repository(
+                args.repository,
+                cwd=args.project,
+                apply=args.apply,
+            )
         elif args.command == "project" and args.project_command == "configure":
             payload = configure_project(args.repository, apply=args.apply)
+        elif args.command == "concept" and args.concept_command == "start":
+            prompt = args.prompt
+            if args.prompt_file:
+                prompt = args.prompt_file.read_text(encoding="utf-8")
+            payload = start_concept(
+                args.project,
+                prompt=prompt,
+                profiles=args.profile,
+                from_existing_docs=args.from_existing_docs,
+                apply=args.apply,
+            )
+        elif args.command == "concept" and args.concept_command == "next":
+            payload = next_concept_task(args.project)
+        elif args.command == "concept" and args.concept_command == "submit":
+            payload = submit_concept_task(
+                args.project,
+                args.task_id,
+                args.result,
+                approval_path=args.approval,
+                apply=args.apply,
+            )
+        elif args.command == "concept" and args.concept_command == "select":
+            payload = select_concept_pitch(
+                args.project, args.pitch_id, args.approval, apply=args.apply
+            )
+        elif args.command == "concept" and args.concept_command == "validate":
+            payload = validate_concept(args.project, require_final=args.require_final)
+        elif args.command == "concept" and args.concept_command == "render":
+            payload = render_concept(args.project, apply=args.apply, check=args.check)
+        elif args.command == "concept" and args.concept_command == "finalize":
+            payload = finalize_concept(args.project, args.approval, apply=args.apply)
+        elif args.command == "concept" and args.concept_command == "revise":
+            payload = revise_concept(args.project, args.change_file, apply=args.apply)
+        elif args.command == "mode" and args.mode_command == "show":
+            payload = {
+                "schema_version": "1.0",
+                "status": "passed",
+                "policy": get_automation_policy(args.project),
+            }
+        elif args.command == "mode" and args.mode_command == "set":
+            payload = set_automation_mode(
+                args.project,
+                args.mode.replace("-", "_"),
+                confirmation=args.confirm,
+                apply=args.apply,
+            )
+        elif args.command == "staging" and args.staging_command == "init":
+            payload = initialize_staging(args.project, apply=args.apply)
+        elif args.command == "staging" and args.staging_command == "merge":
+            payload = prepare_staging_merge(
+                args.project,
+                args.pull_request,
+                apply=args.apply,
+            )
         else:
             payload = {"schema_version": "1.0", "status": "failed", "error": "Unknown command"}
         print(json.dumps(payload, ensure_ascii=False))
@@ -294,8 +496,11 @@ def main(argv: list[str] | None = None) -> int:
     except MissingCapability as error:
         print(json.dumps({"schema_version": "1.0", "status": "blocked", "error": str(error), "missing": error.missing}))
         return error.exit_code
-    except (HumanRequired, WorkflowError) as error:
+    except HumanRequired as error:
         print(json.dumps({"schema_version": "1.0", "status": "needs_human", "error": str(error)}))
+        return error.exit_code
+    except WorkflowError as error:
+        print(json.dumps({"schema_version": "1.0", "status": "failed", "error": str(error)}))
         return error.exit_code
     except ApprovalRequired as error:
         print(json.dumps({"schema_version": "1.0", "status": "needs_human", "error": str(error)}))

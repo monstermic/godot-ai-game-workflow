@@ -56,12 +56,21 @@ class DistributionTests(unittest.TestCase):
                 ".aigame/schemas/project-config.schema.json",
                 ".aigame/schemas/asset-brief.schema.json",
                 ".aigame/schemas/asset-generation-result.schema.json",
+                ".aigame/schemas/game-blueprint.schema.json",
+                ".aigame/schemas/mechanic-spec.schema.json",
+                ".aigame/schemas/content-entry.schema.json",
+                ".aigame/schemas/automation-policy.schema.json",
+                ".aigame/automation.json",
+                ".aigame/profiles/core-game-v1.json",
+                ".aigame/profiles/roguelite-v1.json",
+                ".aigame/agent-skills/build-game-concept/SKILL.md",
                 ".aigame/vendor/aigame/cli.py",
                 ".github/workflows/quality.yml",
                 ".github/workflows/github-sync.yml",
                 ".github/workflows/intake-proposal.yml",
                 ".github/workflows/release-candidate.yml",
                 ".github/workflows/release.yml",
+                ".github/workflows/staging-merge.yml",
                 ".github/PULL_REQUEST_TEMPLATE.md",
                 "LICENSE",
                 "LICENSES/workflow-Apache-2.0.txt",
@@ -80,9 +89,16 @@ class DistributionTests(unittest.TestCase):
             for relative in required:
                 self.assertTrue((root / relative).is_file(), relative)
             workflow = (root / ".github" / "workflows" / "quality.yml").read_text(encoding="utf-8")
+            self.assertIn("branches: [main, staging]", workflow)
             references = re.findall(r"uses:\s+[^\s]+@([^\s]+)", workflow)
             self.assertGreaterEqual(len(references), 2)
             self.assertTrue(all(re.fullmatch(r"[0-9a-f]{40}", value) for value in references))
+            staging = (root / ".github" / "workflows" / "staging-merge.yml").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("issue_comment:", staging)
+            self.assertIn(".github/workflows/staging-merge.yml@", staging)
+            self.assertIn("statuses: write", staging)
             state = (root / "game" / "game_state.gd").read_text(encoding="utf-8")
             self.assertIn("func evaluate_collisions", state)
             self.assertIn("score += 100", state)
@@ -108,7 +124,35 @@ class McpTests(unittest.TestCase):
             Path.cwd(), {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}
         )
         names = {tool["name"] for tool in response["result"]["tools"]}
-        self.assertEqual(names, {"aigame_context", "aigame_next", "aigame_validate"})
+        self.assertEqual(
+            names,
+            {
+                "aigame_context",
+                "aigame_next",
+                "aigame_validate",
+                "aigame_concept_next",
+                "aigame_concept_validate",
+                "aigame_mode_get",
+                "aigame_mode_set",
+                "aigame_staging_init",
+                "aigame_staging_merge",
+            },
+        )
+
+    def test_mode_tool_returns_the_canonical_automation_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "game"
+            create_game(root, "Game", godot_version="4.7", apply=True)
+            response = handle_request(
+                root,
+                {
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "tools/call",
+                    "params": {"name": "aigame_mode_get", "arguments": {}},
+                },
+            )
+            self.assertEqual(response["result"]["structuredContent"]["mode"], "human_gated")
 
 
 class GitHubApplyTests(unittest.TestCase):

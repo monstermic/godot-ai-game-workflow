@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ConceptTask",
+  "type": "object",
+  "required": ["schema_version", "id", "revision", "status", "created_at", "updated_at", "input_fingerprint", "stage", "instructions", "context_refs", "result_contract", "required_capabilities"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "id": {"type": "string", "pattern": "^CTK-[0-9]{4}$"},
+    "revision": {"type": "integer", "minimum": 1},
+    "status": {"enum": ["ready", "submitted", "rework", "cancelled"]},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"},
+    "input_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "stage": {"enum": ["pitching", "product_identity", "mechanics", "content_catalog", "complete_game_arc", "quality_audit"]},
+    "instructions": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "context_refs": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "result_contract": {"type": "string", "minLength": 1},
+    "required_capabilities": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+  },
+  "additionalProperties": true
+}

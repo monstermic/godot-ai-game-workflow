@@ -1,3 +1,3 @@
 # Generic adapter
 
-Read the generated repository’s root `AGENTS.md`. Run `aigame doctor --json`, then `aigame next --json`. Do not mutate files until one work item is claimed with `--apply`. Return schema-valid `RunResult` data and stop on `needs_human` or `blocked`.
+Read the generated repository's root `AGENTS.md` and `.aigame/automation.json`. Run `aigame doctor --json`, then `aigame next --json`. If concept work is incomplete, drive one schema-valid task at a time. In `human_gated` mode stop at approvals; in `ai_staging` mode accept agent approvals and continue. After finalization, complete one work item and target `staging`. Run `aigame staging merge` to obtain the exact approval comment, then stop for the authenticated repository owner to post it on the PR. Never post that comment as the agent or bypass production, release, rollback, secret, paid-service, or destructive gates.

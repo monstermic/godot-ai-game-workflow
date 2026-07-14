@@ -10,7 +10,14 @@ from pathlib import Path
 import yaml
 
 from aigame.generator import initialize_game
-from aigame.repository import build_repository_plan, configure_repository
+from aigame.repository import (
+    STAGING_APPROVAL_CHECK,
+    STAGING_REQUIRED_CHECKS,
+    build_game_repository_plan,
+    build_repository_plan,
+    configure_game_repository,
+    configure_repository,
+)
 from aigame.review import ReviewRejected, validate_review
 
 
@@ -29,10 +36,20 @@ class RepositoryLayoutTests(unittest.TestCase):
             "docs/workflow.md",
             "docs/adapter-contract.md",
             "docs/media-policy.md",
+            "docs/concept-blueprint.md",
             "adapters/generic/AGENTS.md",
             "adapters/codex/AGENTS.md",
             "adapters/claude/CLAUDE.md",
+            "adapters/opencode/AGENTS.md",
             "prompts/implement-work-item.md",
+            "prompts/concept/pitching.md",
+            "prompts/concept/product-identity.md",
+            "prompts/concept/mechanics.md",
+            "prompts/concept/content-catalog.md",
+            "prompts/concept/complete-game-arc.md",
+            "prompts/concept/quality-audit.md",
+            "skills/build-game-concept/SKILL.md",
+            "skills/build-game-concept/agents/openai.yaml",
             ".github/workflows/ci.yml",
             ".github/workflows/contract.yml",
             ".github/workflows/godot-quality.yml",
@@ -40,11 +57,18 @@ class RepositoryLayoutTests(unittest.TestCase):
             ".github/workflows/independent-review.yml",
             ".github/workflows/release-candidate.yml",
             ".github/workflows/release.yml",
+            ".github/workflows/staging-merge.yml",
             ".github/ISSUE_TEMPLATE/intake.yml",
             ".github/PULL_REQUEST_TEMPLATE.md",
         ]
         for relative in required:
             self.assertTrue((ROOT / relative).is_file(), relative)
+
+        skill = (ROOT / "skills" / "build-game-concept" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("aigame concept next --json", skill)
+        self.assertIn("Stop at every `needs_human`", skill)
+        opencode = (ROOT / "adapters" / "opencode" / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertIn("build-game-concept", opencode)
 
     def test_all_external_actions_are_pinned_to_full_commit_shas(self) -> None:
         unpinned: list[str] = []
@@ -91,6 +115,27 @@ class RepositoryLayoutTests(unittest.TestCase):
         )
         self.assertIn("Solo-owner policy", text)
         self.assertIn("pull.user.login === repository.data.owner.login", text)
+
+    def test_ci_runs_after_staging_integration(self) -> None:
+        text = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertIn("branches: [main, staging]", text)
+
+    def test_staging_merge_authenticates_owner_comment_and_revalidates_head(self) -> None:
+        text = (ROOT / ".github" / "workflows" / "staging-merge.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("issue_comment:", text)
+        self.assertIn("github.event.comment", text)
+        self.assertIn("OWNER_LOGIN", text)
+        self.assertIn("GITHUB_ACTOR", text)
+        self.assertIn("gh pr checks", text)
+        self.assertIn("statuses/$HEAD_SHA", text)
+        self.assertIn(f"context={STAGING_APPROVAL_CHECK}", text)
+        self.assertIn("statuses: write", text)
+        self.assertIn("--match-head-commit", text)
+        self.assertIn("inputs['comment-body'] || github.event.comment.body", text)
+        self.assertNotIn("inputs.pull-request", text)
+        self.assertNotIn("inputs.comment-body", text)
 
 
 class InitializeTests(unittest.TestCase):
@@ -165,8 +210,21 @@ class RepositoryConfigurationTests(unittest.TestCase):
         plan = build_repository_plan("monstermic/godot-ai-game-workflow")
         self.assertEqual(plan["repository"]["visibility"], "public")
         self.assertTrue(plan["repository"]["is_template"])
+        self.assertTrue(plan["repository"]["allow_auto_merge"])
         self.assertIn("contract / contract", plan["ruleset"]["required_checks"])
         self.assertIn("godot-quality / godot-quality", plan["ruleset"]["required_checks"])
+        self.assertEqual(plan["staging_ruleset"]["include"], ["refs/heads/staging"])
+        self.assertTrue(plan["staging_ruleset"]["allow_branch_creation"])
+        self.assertIn(
+            "independent-review / independent-review",
+            plan["staging_ruleset"]["required_checks"],
+        )
+        self.assertEqual(plan["staging_ruleset"]["required_checks"], STAGING_REQUIRED_CHECKS)
+        self.assertIn(STAGING_APPROVAL_CHECK, plan["staging_ruleset"]["required_checks"])
+        self.assertEqual(
+            plan["staging_ruleset"]["required_check_integrations"],
+            {STAGING_APPROVAL_CHECK: 15368},
+        )
         self.assertEqual(
             plan["project"]["statuses"],
             ["Intake", "Ready", "Active", "Review", "Playtest", "Blocked", "Done"],
@@ -174,6 +232,10 @@ class RepositoryConfigurationTests(unittest.TestCase):
         self.assertIn("Work ID", plan["project"]["fields"])
         self.assertIn("Build", plan["project"]["fields"])
         self.assertEqual(plan["actions"]["default_workflow_permissions"], "read")
+        self.assertEqual(
+            plan["actions"]["patterns_allowed"],
+            ["monstermic/godot-ai-game-workflow/.github/workflows/*@*"],
+        )
         self.assertEqual(plan["environment"]["name"], "production")
 
         client = FakeRepositoryClient()
@@ -195,8 +257,32 @@ class RepositoryConfigurationTests(unittest.TestCase):
                 "enable_security_features",
                 "ensure_environment",
                 "ensure_ruleset",
+                "ensure_ruleset",
             ],
         )
+
+    def test_game_configuration_preserves_private_non_template_identity(self) -> None:
+        plan = build_game_repository_plan("monstermic/private-game")
+        self.assertNotIn("visibility", plan["repository"])
+        self.assertNotIn("is_template", plan["repository"])
+        self.assertTrue(plan["repository"]["allow_auto_merge"])
+        self.assertEqual(plan["staging_ruleset"]["include"], ["refs/heads/staging"])
+
+        client = FakeRepositoryClient()
+        applied = configure_game_repository(
+            "monstermic/private-game",
+            client=client,
+            apply=True,
+        )
+        self.assertEqual(applied["status"], "passed")
+        edited = next(value for name, value in client.calls if name == "edit_repository")
+        self.assertNotIn("visibility", edited)
+        self.assertNotIn("is_template", edited)
+        self.assertEqual(
+            [name for name, _ in client.calls].count("ensure_ruleset"),
+            2,
+        )
+        self.assertEqual([name for name, _ in client.calls].count("ensure_environment"), 1)
 
 
 if __name__ == "__main__":

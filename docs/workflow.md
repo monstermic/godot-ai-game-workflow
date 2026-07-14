@@ -1,11 +1,13 @@
 # Workflow and gates
 
-The product lifecycle is bootstrap → discovery → experiment → first playable → vertical slice → production → alpha/beta → release candidate → release/post-release.
+The product lifecycle is bootstrap → concept blueprint → experiment → first playable → vertical slice → production → alpha/beta → release candidate → release/post-release.
 
-Work items move through `draft → ready → claimed → implementing → validating → review → playtest → done`; blocked, rework, and cancelled are explicit side states. V1 permits one active implementation slice per game repository.
+Concept work moves through `intake → pitching → direction selection → product identity → mechanics → content catalog → complete game arc → quality audit → blueprint approval → finalized`. The agent completes one schema-valid `CTK-` task at a time. In `human_gated` mode, direction, final product identity, and complete blueprint are checksum-bound human gates. In `ai_staging` mode, the agent records checksum-bound agent approvals and continues.
 
-`aigame next` orders eligible work by release blocker, risk, dependency fan-out, player value, smallest estimate, then ID. A red unknown, missing capability, or approval-triggering operation stops with `needs_human`.
+Implementation work remains `draft → ready → claimed → implementing → validating → review → playtest → done`; blocked, rework, and cancelled are explicit side states. Exactly one implementation slice may be active. A ready item is eligible only after all dependencies are done.
 
-Human gates cover vision and scope, prototype continuation, vertical-slice quality and production budget, every merge, subjective playtest claims, release promotion, and rollback. Dependencies, paid services, model downloads, secrets, networking, save migrations, destructive changes, deployment, and bulk media require approval before mutation.
+`aigame next` returns concept work first. After finalization it orders eligible implementation work by release blocker, risk, dependency fan-out, player value, smallest estimate, then ID. A missing capability, invalid state, stale approval, or protected operation stops safely. In AI staging mode, ordinary project decisions and operations continue automatically; protected staging, production, release, rollback, secret, paid-service, and destructive external gates do not.
 
-Definition of Ready requires player value, acceptance behavior, dependencies, risks, capabilities, non-goals, tests, and playtest intent. Definition of Done requires merged behavior, deterministic checks, runtime evidence, media provenance, documentation, independent review, human playtest when subjective, and a downloadable build.
+Blueprint Ready requires approved product identity, implementation-ready mechanics, a final named launch catalog, explicit opening-to-ending journey, complete profile classification, acyclic roadmap, game Definition of Done coverage, no required placeholders, and current approval.
+
+Game Done requires implemented and evidenced must-scope mechanics/content, a playable opening-to-ending path, working terminal states and recovery, accessibility/performance/compatibility/provenance gates, human evidence for subjective claims, and promotion of the approved immutable release candidate without rebuilding.

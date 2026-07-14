@@ -1,0 +1,21 @@
+{
+  "schema_version": "1.0",
+  "id": "core-game-v1",
+  "version": 1,
+  "title": "Universal Game Quality",
+  "description": "Minimum coherence and release coverage for any complete game blueprint.",
+  "items": [
+    {"id": "CORE-001", "category": "identity", "title": "Distinct player promise", "guidance": "The game has a recognizable identity and a concrete player fantasy.", "evidence": ["blueprint", "human_approval"]},
+    {"id": "CORE-002", "category": "gameplay", "title": "Complete core loop", "guidance": "Moment-to-moment, session, and long-term loops reinforce each other.", "evidence": ["mechanic_spec", "runtime", "playtest"]},
+    {"id": "CORE-003", "category": "journey", "title": "Beginning-to-ending path", "guidance": "The opening, progression, final challenge, terminal states, ending, and postgame are explicit.", "evidence": ["blueprint", "runtime"]},
+    {"id": "CORE-004", "category": "scope", "title": "Bounded launch scope", "guidance": "Every launch entry is named and categorized as must, optional, or cut.", "evidence": ["content_catalog", "roadmap"]},
+    {"id": "CORE-005", "category": "controls", "title": "Responsive controls", "guidance": "Inputs, timing, feedback, remapping, and controller behavior are specified and testable.", "evidence": ["mechanic_spec", "runtime", "playtest"]},
+    {"id": "CORE-006", "category": "choices", "title": "Meaningful decisions", "guidance": "Important choices have understandable consequences and non-trivial trade-offs.", "evidence": ["blueprint", "playtest"]},
+    {"id": "CORE-007", "category": "feedback", "title": "Readable feedback", "guidance": "Visual, animation, audio, UI, accessibility, and controller feedback communicate game state.", "evidence": ["mechanic_spec", "runtime", "playtest"]},
+    {"id": "CORE-008", "category": "onboarding", "title": "Understandable onboarding", "guidance": "Players learn the first useful verb and decision without developer intervention.", "evidence": ["blueprint", "playtest"]},
+    {"id": "CORE-009", "category": "accessibility", "title": "Accessible information and input", "guidance": "The blueprint covers remapping, text, color, motion, audio alternatives, and difficulty assistance as applicable.", "evidence": ["blueprint", "manual_qa"]},
+    {"id": "CORE-010", "category": "reliability", "title": "Reliable save and recovery", "guidance": "Progress, interruption, failure recovery, and save compatibility are defined.", "evidence": ["mechanic_spec", "test", "manual_qa"]},
+    {"id": "CORE-011", "category": "technical", "title": "Performance and compatibility", "guidance": "Target frame rate, loading, platform, input, and stability budgets are verifiable.", "evidence": ["test", "runtime", "build"]},
+    {"id": "CORE-012", "category": "coherence", "title": "Systemic and emotional payoff", "guidance": "Mechanics, content, presentation, progression, and ending support the same intended experience.", "evidence": ["quality_assessment", "playtest", "human_approval"]}
+  ]
+}

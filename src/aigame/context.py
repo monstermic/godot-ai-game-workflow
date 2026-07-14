@@ -21,10 +21,19 @@ def build_context(root: Path | str, work_item_id: str) -> dict[str, Any]:
     documents: dict[str, str] = {}
     for path in sorted((project / "docs").glob("*.md")):
         documents[path.stem] = path.read_text(encoding="utf-8")
+    concept_records = []
+    for concept_id in item.get("concept_refs", []):
+        matches = sorted((project / "work" / "concept").rglob(f"{concept_id}.json"))
+        if not matches:
+            raise FileNotFoundError(f"Unknown concept record linked by {work_item_id}: {concept_id}")
+        if len(matches) > 1:
+            raise RuntimeError(f"Duplicate concept record path for {concept_id}")
+        concept_records.append(_load(matches[0]))
     return {
         "schema_version": "1.0",
         "status": "passed",
         "work_item": item,
         "requirements": requirements,
+        "concept_records": concept_records,
         "documents": documents,
     }

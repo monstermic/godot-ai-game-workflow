@@ -1,1 +1,1 @@
-Follow `AGENTS.md`. Do not infer red decisions, work outside the active work item, push to `main`, self-approve review, or publish releases.
+Follow `AGENTS.md` and `.aigame/automation.json`. Do not implement before blueprint finalization. In AI-staging mode make concept decisions and accept generated agent approvals; otherwise retain human gates. Work only in the active task, target `staging`, never push to `main`, never self-approve review, and never bypass the exact staging approval or publish releases.

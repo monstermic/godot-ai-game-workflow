@@ -11,6 +11,8 @@ from importlib.resources import files
 from pathlib import Path
 from typing import Any
 
+from . import __version__
+from .automation import default_automation_policy
 from .core import fingerprint, workflow_snapshot_checksum
 
 
@@ -69,7 +71,11 @@ def create_game(
     planned = [
         "AGENTS.md",
         ".aigame/project.toml",
+        ".aigame/automation.json",
         ".aigame/workflow.lock.json",
+        ".aigame/state/concept.json",
+        ".aigame/profiles/core-game-v1.json",
+        ".aigame/profiles/roguelite-v1.json",
         "project.godot",
         "work/requirements/REQ-0001.json",
         "work/items/WI-0001.json",
@@ -89,7 +95,7 @@ name = "{name.replace('"', '')}"
 slug = "{_slug(name)}"
 visibility = "private"
 source_license = "proprietary"
-workflow_version = "1.0.0"
+workflow_version = "{__version__}"
 current_milestone = "bootstrap"
 godot_version = "{godot_version}"
 godot_release = "{GODOT_RELEASE}"
@@ -114,6 +120,7 @@ max_binary_mb = 50
 human_approval = ["vision", "scope", "dependencies", "paid-api", "model-download", "secrets", "save-migration", "networking", "destructive", "bulk-media", "merge", "release", "rollback"]
 '''
     _text(root / ".aigame" / "project.toml", project_toml)
+    _json(root / ".aigame" / "automation.json", default_automation_policy())
     declared_packs = {
         "3d": "3D scenes, meshes, lighting, physics, and performance budgets",
         "narrative": "branching narrative structures, dialogue, and content validation",
@@ -135,7 +142,7 @@ activation = "requires a workflow upgrade, capability detection, tests, and huma
         )
     workflow_lock = {
         "schema_version": "1.0",
-        "workflow_version": "1.0.0",
+        "workflow_version": __version__,
         "source": "monstermic/godot-ai-game-workflow",
         "source_commit": workflow_commit,
         "source_sha256": "",
@@ -149,15 +156,43 @@ activation = "requires a workflow upgrade, capability detection, tests, and huma
             "last_checkpoint": None,
         },
     )
+    _json(
+        root / ".aigame" / "state" / "concept.json",
+        {
+            "schema_version": "1.0",
+            "revision": 1,
+            "status": "not_started",
+            "active_task_id": None,
+            "next_task_number": 1,
+            "intake_id": None,
+            "selected_pitch_id": None,
+            "direction_approval_id": None,
+            "product_identity_id": None,
+            "product_identity_approval_id": None,
+            "blueprint_approval_id": None,
+            "pending_approval": None,
+            "pending_approval_options": None,
+            "history": [],
+        },
+    )
     _text(
         root / "AGENTS.md",
         """# Agent entrypoint
 
 Read `.aigame/project.toml`, then run `aigame doctor --json` and `aigame next --json`.
-Never push directly to `main`, invent missing red decisions, approve your own review, or publish a release.
+Read `.aigame/automation.json` before making any approval or integration decision.
+When concept work has not started, run `aigame concept start --prompt-file <file> --apply`, then
+repeat `aigame concept next --json` and schema-valid `aigame concept submit` operations.
+In `human_gated` mode stop for direction, product identity, and blueprint approval. In
+`ai_staging` mode make those decisions, retain the generated agent approvals, and continue.
+Do not write implementation code until concept state is `finalized`.
+Never push directly to `main`, approve your own independent review, or publish a release.
 Before changing files, claim exactly one work item with `aigame claim WI-#### --apply`.
 Use `aigame context WI-#### --json`, implement only that packet, run `aigame validate WI-####`,
 and save resumable evidence with `aigame checkpoint WI-#### --result run-result.json --apply`.
+AI-mode pull requests target `staging`. `aigame staging merge` returns an exact approval comment;
+only the authenticated repository owner may post it. The agent never posts or bypasses that gate.
+Production, release, and rollback remain separately protected.
 All mutating workflow commands are previews unless `--apply` is supplied.
 """,
     )
@@ -171,6 +206,14 @@ All mutating workflow commands are previews unless `--apply` is supplied.
         _text(
             root / ".aigame" / "schemas" / schema_entry.name,
             schema_entry.read_text(encoding="utf-8"),
+        )
+    profile_source = files("aigame.profiles")
+    for profile_entry in profile_source.iterdir():
+        if not profile_entry.name.endswith(".json"):
+            continue
+        _text(
+            root / ".aigame" / "profiles" / profile_entry.name,
+            profile_entry.read_text(encoding="utf-8"),
         )
     package_source = files("aigame")
     for module in package_source.iterdir():
@@ -186,6 +229,13 @@ All mutating workflow commands are previews unless `--apply` is supplied.
                 root / ".aigame" / "vendor" / "aigame" / "schemas" / schema_entry.name,
                 schema_entry.read_text(encoding="utf-8"),
             )
+    _text(root / ".aigame" / "vendor" / "aigame" / "profiles" / "__init__.py", '"""Vendored quality profiles."""')
+    for profile_entry in profile_source.iterdir():
+        if profile_entry.name.endswith(".json"):
+            _text(
+                root / ".aigame" / "vendor" / "aigame" / "profiles" / profile_entry.name,
+                profile_entry.read_text(encoding="utf-8"),
+            )
     workflow_lock["source_sha256"] = workflow_snapshot_checksum(
         root / ".aigame" / "vendor" / "aigame"
     )
@@ -199,7 +249,7 @@ on:
   pull_request_review:
     types: [submitted, dismissed]
   push:
-    branches: [main]
+    branches: [main, staging]
   workflow_dispatch:
 
 permissions:
@@ -280,6 +330,29 @@ jobs:
 ''',
     )
     _text(
+        root / ".github" / "workflows" / "staging-merge.yml",
+        f'''name: Staging Merge Approval
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  pull-requests: write
+  statuses: write
+
+jobs:
+  merge:
+    if: github.event.issue.pull_request && startsWith(github.event.comment.body, '/aigame merge staging ')
+    uses: monstermic/godot-ai-game-workflow/.github/workflows/staging-merge.yml@{workflow_commit}
+    with:
+      pull-request: ${{{{ github.event.issue.number }}}}
+      actor: ${{{{ github.actor }}}}
+      comment-body: ${{{{ github.event.comment.body }}}}
+''',
+    )
+    _text(
         root / ".github" / "workflows" / "release.yml",
         f'''name: Release
 on:
@@ -318,9 +391,9 @@ Closes WI-
 - [ ] Human playtest is attached or not applicable
 - [ ] Save/performance/accessibility impacts are documented
 
-## Human merge gate
+## Integration gate
 
-The repository owner must merge manually after required checks pass.
+Human-gated projects are merged by the owner. In AI-staging projects, `aigame staging merge` returns an exact SHA-bound approval comment. Only the authenticated repository owner may post it; GitHub then revalidates checks and sets the required Actions-App-bound status before squash auto-merge.
 """,
     )
     _text(root / "LICENSE", "Copyright (c) Game Owner. All rights reserved.\n\nNo license is granted except by written permission.")
@@ -328,10 +401,14 @@ The repository owner must merge manually after required checks pass.
         root / "LICENSES" / "workflow-Apache-2.0.txt",
         "The embedded AI Game Workflow tooling is licensed under Apache License 2.0.\nSee https://www.apache.org/licenses/LICENSE-2.0",
     )
-    _text(root / "docs" / "game_brief.md", f"# {name}\n\nStatus: discovery required.\n")
+    _text(root / "docs" / "game_brief.md", f"# {name}\n\nStatus: concept blueprint required.\n")
     _text(root / "docs" / "game_design.md", "# Game design\n\nDefine the player fantasy, pillars, and core loop.")
     _text(root / "docs" / "technical_design.md", "# Technical design\n\nGodot 4, GDScript, offline 2D baseline.")
     _text(root / "docs" / "creative_bible.md", "# Creative bible\n\nPlaceholders only until the vertical-slice style gate.")
+    _text(
+        root / "docs" / "blueprint" / "README.md",
+        "# Generated blueprint\n\nThese files are rendered deterministically from `work/concept/`. Do not edit them by hand.",
+    )
     _text(root / "docs" / "playtests" / "README.md", "# Playtests\n\nHuman evidence for subjective claims belongs here.")
 
     requirement = _record(
@@ -340,9 +417,9 @@ The repository owner must merge manually after required checks pass.
             "id": "REQ-0001",
             "revision": 1,
             "status": "draft",
-            "title": "Approve the game vision and scope",
-            "player_value": "A bounded game concept that can be tested before production.",
-            "acceptance_criteria": ["The owner approves the game brief and initial scope budget."],
+            "title": "Approve the complete game blueprint and scope",
+            "player_value": "An implementation-ready, named, beginning-to-ending game contract.",
+            "acceptance_criteria": ["The owner approves the complete blueprint, launch catalog, mechanics, roadmap, and game Definition of Done."],
             "playtest_hypotheses": [],
             "non_goals": ["Production implementation before discovery approval."],
         }
@@ -353,8 +430,8 @@ The repository owner must merge manually after required checks pass.
             "id": "WI-0001",
             "revision": 1,
             "status": "ready",
-            "title": "Complete structured game discovery",
-            "type": "discovery",
+            "title": "Create complete game blueprint from user prompt",
+            "type": "concept_blueprint",
             "milestone": "bootstrap",
             "requirements": ["REQ-0001"],
             "dependencies": [],
@@ -365,14 +442,37 @@ The repository owner must merge manually after required checks pass.
             "estimate": 1,
             "required_capabilities": ["filesystem", "shell", "git"],
             "unknowns": [],
-            "scope": ["docs/game_brief.md", "docs/game_design.md"],
-            "tests": ["aigame validate WI-0001"],
+            "scope": ["work/concept", "docs/blueprint"],
+            "tests": ["aigame concept validate --json", "aigame validate WI-0001"],
             "playtest_required": False,
-            "definition_of_done": ["Vision and scope approval is recorded as APR-0001."],
+            "definition_of_done": ["Direction, product identity, and complete blueprint approvals are recorded and current."],
         }
     )
     _json(root / "work" / "requirements" / "REQ-0001.json", requirement)
     _json(root / "work" / "items" / "WI-0001.json", item)
+    _text(
+        root / "work" / "concept" / "README.md",
+        "# Concept records\n\nJSON records in this directory are canonical. Use `aigame concept` commands to create or revise them.",
+    )
+    _text(
+        root / ".aigame" / "agent-skills" / "build-game-concept" / "SKILL.md",
+        """---
+name: build-game-concept
+description: Turn a user game prompt into the complete portable aigame blueprint before implementation.
+---
+
+# Build Game Concept
+
+Read the generated `AGENTS.md` and `.aigame/automation.json`. Drive concept work through the
+pinned vendored workflow and produce one schema-valid result at a time. In `human_gated` mode,
+stop at every approval and use the selected pitch's exact request. In `ai_staging` mode, make the
+creative decisions, accept the CLI-generated agent approvals, and continue automatically.
+After finalization, complete one work item and target `staging`. Run `aigame staging merge` to obtain
+the exact approval comment, then stop for the authenticated repository owner to post it. The agent
+must not post that comment. Independent review remains mandatory.
+Never bypass production, release, rollback, secrets, paid services, or destructive external gates.
+""",
+    )
     _text(
         root / "work" / "decisions" / "README.md",
         "# Decisions\n\nUse `DEC-####.json` records for durable design and technical choices. Red decisions require a bound approval.",
