@@ -84,7 +84,7 @@ class RepositoryLayoutTests(unittest.TestCase):
         text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
         self.assertIn('aigame = "aigame.cli:main"', text)
         self.assertIn('requires-python = ">=3.11"', text)
-        self.assertIn('test = ["PyYAML==6.0.3"]', text)
+        self.assertIn('test = ["PyYAML==6.0.3", "hypothesis==6.156.4"]', text)
         contract = (ROOT / ".github" / "workflows" / "contract.yml").read_text(
             encoding="utf-8"
         )

@@ -1,6 +1,6 @@
 ---
 name: generate-game-assets
-description: Plan, generate, validate, integrate, audit, or resume the complete deterministic 16x16 visual and procedural-audio inventory required by a finalized aigame blueprint. Use when Codex must create game sprites, animation sets, tile atlases, particles, UI, SFX, ambience, music, procedural enemy parts, or Godot media resources in a repository using the portable aigame workflow.
+description: Plan, generate, validate, integrate, audit, or resume the complete structured deterministic 16-128 px visual and procedural-audio inventory required by a finalized aigame blueprint. Use when Codex must create game sprites, animation sets, tile atlases, particles, UI, SFX, ambience, music, procedural actor parts, or Godot media resources in a repository using the portable aigame workflow.
 ---
 
 # Generate Game Assets
@@ -9,6 +9,10 @@ Operate in the initialized game directory containing `.aigame/project.toml`. Tre
 `.aigame/automation.json`, `.aigame/media.toml`, `work/concept/`, and `work/assets/` as authoritative.
 Do not invent or omit launch scope: the approved blueprint owns required mechanics, content, states,
 events, stages, endings, UI, accessibility feedback, and quality gates.
+Generation additionally requires approved `MDR-0001` and exhaustive `ARQ-####` records. Treat
+free-text purpose as descriptive only; family, subtype, body family, tags, timing, and dimensions
+must come from the structured request. If `assets next` returns `restart_stage: asset_specification`,
+stop generation and revise the concept contract.
 
 ## Run the protocol
 
@@ -37,8 +41,9 @@ For a single bounded retry, use `aigame assets generate ASP-#### --jobs <n> ...`
 
 ## Preserve determinism and provenance
 
-- Keep native pixels on the 16x16 grid, indexed palettes, integer anchors, declared layer order,
-  nearest filtering, and complete four-direction animation contracts.
+- Keep indexed palettes, 16-pixel logical source coordinates, an explicitly locked 16–128 px output
+  size, neutral integer anchors, declared family-specific layer order, nearest filtering, and
+  complete four-direction animation contracts.
 - Keep every biome's terrain masks, adjacency rules, collisions, navigation, hazards, decoration,
   and procedural stage constraints complete. Never accept a disconnected layout.
 - Keep SFX at 48 kHz/16-bit PCM, short repeated events at three variants, loops sample-aligned,

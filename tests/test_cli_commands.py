@@ -194,6 +194,76 @@ class CommandTests(unittest.TestCase):
 
 
 class UpgradeTests(unittest.TestCase):
+    def test_upgrade_reports_structured_asset_specification_remediation_for_legacy_games(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "game"
+            create_game(root, "Legacy Game", godot_version="4.7", apply=True)
+            concept_state_path = root / ".aigame/state/concept.json"
+            concept_state = json.loads(concept_state_path.read_text(encoding="utf-8"))
+            concept_state["status"] = "finalized"
+            concept_state["blueprint_approval_id"] = "APR-0001"
+            concept_state_path.write_text(json.dumps(concept_state), encoding="utf-8")
+            source_root = Path(aigame.__file__).resolve().parent
+            source_checksum = workflow_snapshot_checksum(source_root)
+            result = upgrade_workflow(
+                root,
+                __version__,
+                "b" * 40,
+                source_checksum,
+                apply=False,
+            )
+            self.assertTrue(result["requires_concept_revision"])
+            self.assertEqual("asset_specification", result["remediation"]["restart_stage"])
+            self.assertIn("aigame concept revise", result["remediation"]["command"])
+
+    def test_upgrade_rejects_existing_but_invalid_structured_media_contracts(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "game"
+            create_game(root, "Invalid Media Contract", godot_version="4.7", apply=True)
+            concept_state_path = root / ".aigame/state/concept.json"
+            concept_state = json.loads(concept_state_path.read_text(encoding="utf-8"))
+            concept_state["status"] = "finalized"
+            concept_state_path.write_text(json.dumps(concept_state), encoding="utf-8")
+            direction_path = root / "work/concept/MDR-0001.json"
+            direction_path.parent.mkdir(parents=True, exist_ok=True)
+            direction_path.write_text("{}", encoding="utf-8")
+            request_path = root / "work/concept/media_requests/ARQ-0001.json"
+            request_path.parent.mkdir(parents=True, exist_ok=True)
+            request_path.write_text("{}", encoding="utf-8")
+
+            source_root = Path(aigame.__file__).resolve().parent
+            result = upgrade_workflow(
+                root,
+                __version__,
+                "c" * 40,
+                workflow_snapshot_checksum(source_root),
+                apply=False,
+            )
+
+            self.assertTrue(result["requires_concept_revision"])
+            self.assertTrue(result["remediation"]["contract_errors"])
+
+    def test_upgrade_routes_legacy_quality_audit_back_to_asset_specification(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "game"
+            create_game(root, "Legacy Mid Concept", godot_version="4.7", apply=True)
+            concept_state_path = root / ".aigame/state/concept.json"
+            concept_state = json.loads(concept_state_path.read_text(encoding="utf-8"))
+            concept_state["status"] = "quality_audit"
+            concept_state_path.write_text(json.dumps(concept_state), encoding="utf-8")
+
+            source_root = Path(aigame.__file__).resolve().parent
+            result = upgrade_workflow(
+                root,
+                __version__,
+                "d" * 40,
+                workflow_snapshot_checksum(source_root),
+                apply=False,
+            )
+
+            self.assertTrue(result["requires_concept_revision"])
+            self.assertEqual("asset_specification", result["remediation"]["restart_stage"])
+
     def test_upgrade_is_additive_and_installs_the_complete_current_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "game"

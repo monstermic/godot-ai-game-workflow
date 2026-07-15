@@ -11,7 +11,7 @@
     "created_at": {"type": "string", "format": "date-time"},
     "updated_at": {"type": "string", "format": "date-time"},
     "input_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-    "stage": {"enum": ["pitching", "product_identity", "mechanics", "content_catalog", "complete_game_arc", "quality_audit"]},
+    "stage": {"enum": ["pitching", "product_identity", "mechanics", "content_catalog", "complete_game_arc", "asset_specification", "quality_audit"]},
     "instructions": {"type": "array", "items": {"type": "string"}, "minItems": 1},
     "context_refs": {"type": "array", "items": {"type": "string"}, "minItems": 1},
     "result_contract": {"type": "string", "minLength": 1},

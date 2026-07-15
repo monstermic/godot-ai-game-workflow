@@ -40,7 +40,7 @@ jobs:
             aigame validate --project "$temporary/game" --json
             aigame assets validate --project "$temporary/game" --json
           else
-            python -m pip install 'jsonschema>=4.26,<5' 'Pillow==12.3.0' 'numpy==2.4.6'
+            python -m pip install 'jsonschema>=4.26,<5' 'Pillow==12.3.0' 'numpy==2.4.6' 'hypothesis==6.156.4'
             PYTHONPATH="$PROJECT_PATH/.aigame/vendor" python -m aigame validate --project "$PROJECT_PATH" --json
             PYTHONPATH="$PROJECT_PATH/.aigame/vendor" python -m aigame assets validate --project "$PROJECT_PATH" --json
           fi

@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MediaDirection",
+  "type": "object",
+  "required": ["schema_version", "id", "revision", "status", "created_at", "updated_at", "input_fingerprint", "art", "audio", "accessibility", "technical", "references", "control"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "id": {"const": "MDR-0001"},
+    "revision": {"type": "integer", "minimum": 1},
+    "status": {"enum": ["approved", "rework", "deprecated"]},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"},
+    "input_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "art": {
+      "type": "object",
+      "required": ["style", "perspective", "frame_size", "tile_size", "outline", "shading", "light_direction", "palette", "reserved_colors", "readability"],
+      "properties": {
+        "style": {"type": "string", "minLength": 1},
+        "perspective": {"const": "top_down"},
+        "frame_size": {"$ref": "#/$defs/pixelDimensions"},
+        "tile_size": {"$ref": "#/$defs/pixelDimensions"},
+        "outline": {"type": "string", "minLength": 1},
+        "shading": {"type": "string", "minLength": 1},
+        "light_direction": {"type": "string", "minLength": 1},
+        "palette": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string", "pattern": "^#[0-9a-fA-F]{8}$"}},
+        "reserved_colors": {"type": "object", "additionalProperties": {"type": "string", "pattern": "^#[0-9a-fA-F]{8}$"}},
+        "readability": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": true
+    },
+    "audio": {
+      "type": "object",
+      "required": ["identity", "sample_rate", "bit_depth", "peak_dbfs", "spatialization", "looping"],
+      "properties": {
+        "identity": {"type": "string", "minLength": 1},
+        "sample_rate": {"const": 48000},
+        "bit_depth": {"const": 16},
+        "peak_dbfs": {"type": "number", "maximum": -1},
+        "spatialization": {"type": "string", "minLength": 1},
+        "looping": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": true
+    },
+    "accessibility": {
+      "type": "object",
+      "required": ["color_independent_cues", "reduced_flash", "reduced_motion", "audio_alternatives"],
+      "properties": {
+        "color_independent_cues": {"type": "boolean"},
+        "reduced_flash": {"type": "boolean"},
+        "reduced_motion": {"type": "boolean"},
+        "audio_alternatives": {"type": "boolean"}
+      },
+      "additionalProperties": true
+    },
+    "technical": {
+      "type": "object",
+      "required": ["engine", "image_format", "image_mode", "filter", "background", "budgets"],
+      "properties": {
+        "engine": {"type": "string", "minLength": 1},
+        "image_format": {"const": "png"},
+        "image_mode": {"const": "indexed"},
+        "filter": {"const": "nearest"},
+        "background": {"const": "transparent"},
+        "budgets": {"type": "object"}
+      },
+      "additionalProperties": true
+    },
+    "references": {"$ref": "#/$defs/references"},
+    "control": {"$ref": "#/$defs/control"}
+  },
+  "$defs": {
+    "pixelDimensions": {
+      "type": "array",
+      "prefixItems": [
+        {"type": "integer", "minimum": 16, "maximum": 128, "multipleOf": 16},
+        {"type": "integer", "minimum": 16, "maximum": 128, "multipleOf": 16}
+      ],
+      "items": false
+    },
+    "references": {
+      "type": "object",
+      "required": ["canonical", "structural", "stylistic", "negative"],
+      "properties": {
+        "canonical": {"type": "array", "items": {"type": "string"}},
+        "structural": {"type": "array", "items": {"type": "string"}},
+        "stylistic": {"type": "array", "items": {"type": "string"}},
+        "negative": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": false
+    },
+    "control": {
+      "type": "object",
+      "required": ["locked", "variable", "generator_decides", "negative_constraints"],
+      "properties": {
+        "locked": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "variable": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "generator_decides": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "negative_constraints": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": true
+}
