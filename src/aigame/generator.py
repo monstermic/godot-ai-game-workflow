@@ -67,9 +67,14 @@ func compose(recipe: Dictionary, parts: Dictionary, seed: int) -> Texture2D:
     var key := cache_key(recipe, seed, parts)
     if _cache.has(key):
         return _cache[key]
+    var parameters: Dictionary = recipe.get("parameters", {})
+    var dimensions: Array = parameters.get("frame_dimensions", [GRID_SIZE, GRID_SIZE])
+    var output_size := Vector2i(int(dimensions[0]), int(dimensions[1]))
+    if output_size.x < GRID_SIZE or output_size.y < GRID_SIZE or output_size.x > 128 or output_size.y > 128 or output_size.x % GRID_SIZE != 0 or output_size.y % GRID_SIZE != 0:
+        push_error("AIGame media recipe has unsupported frame dimensions %s" % output_size)
+        return null
     var image := Image.create(GRID_SIZE, GRID_SIZE, false, Image.FORMAT_RGBA8)
     image.fill(Color.TRANSPARENT)
-    var parameters: Dictionary = recipe.get("parameters", {})
     var palette: Dictionary = parameters.get("palette", recipe.get("palette", {}))
     var direction: String = recipe.get("direction", parameters.get("direction", "down"))
     var layers: Array = recipe.get("layers", parameters.get("layers", []))
@@ -102,6 +107,8 @@ func compose(recipe: Dictionary, parts: Dictionary, seed: int) -> Texture2D:
             var offset_value: Array = layer.get("offset", [0, 0])
             var offset := Vector2i(int(offset_value[0]), int(offset_value[1]))
             image.blend_rect(part_image, Rect2i(Vector2i.ZERO, part_image.get_size()), offset)
+    if output_size != Vector2i(GRID_SIZE, GRID_SIZE):
+        image.resize(output_size.x, output_size.y, Image.INTERPOLATE_NEAREST)
     var texture := ImageTexture.create_from_image(image)
     _cache[key] = texture
     return texture
@@ -311,6 +318,7 @@ activation = "requires a workflow upgrade, capability detection, tests, and huma
         '''schema_version = "1.0"
 revision = 1
 grid_size = 16
+max_output_dimension = 128
 perspective = "top_down"
 directions = ["down", "left", "right", "up"]
 runtime_generation = "build_and_runtime"
@@ -331,7 +339,7 @@ tile_atlas_budget_seconds = 1.0
 id = "pixel-media-v1"
 status = "implemented"
 implemented = true
-summary = "Deterministic 16x16 modular sprites, animations, tile sets, particles, UI, sound effects, ambience, and adaptive loops"
+summary = "Structured, fail-closed deterministic 16-128 px sprites, animations, tile sets, particles, UI, sound effects, ambience, and adaptive loops"
 activation = "aigame assets plan --apply --json"
 ''',
     )
@@ -672,13 +680,14 @@ review, staging-owner approval, production, release, rollback, secrets, or destr
     source_pack = {
         "schema_version": "1.0",
         "id": "core-topdown-v1",
-        "name": "Core Top-down 16x16",
+        "name": "Core Top-down Pixel Parts (16-128 px outputs)",
+        "pack_revision": 2,
         "license": "CC0-1.0",
         "grid_size": 16,
         "perspective": "top_down",
         "directions": ["down", "left", "right", "up"],
-        "body_families": ["humanoid", "compact_enemy"],
-        "parts": ["shadow", "body", "legs", "head", "front_weapon", "front_effect"],
+        "body_families": ["humanoid", "serpentine", "quadruped", "winged", "amorphous", "mechanical_vehicle"],
+        "parts": [],
         "provenance": "Original procedural coordinates; no LPC or third-party artwork is bundled.",
     }
     source_pack["sha256"] = fingerprint(source_pack)

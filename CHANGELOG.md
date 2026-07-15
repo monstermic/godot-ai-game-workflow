@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.0 — 2026-07-16
+
+- Added the `asset_specification` concept stage with approved `MDR-0001` media direction, exhaustive `ARQ-####` requests, derived fingerprinted `ABR-####` briefs, and v2 multi-output adapter results.
+- Replaced free-text and humanoid fallback selection with fail-closed structured family/subtype contracts, six family-specific actor part sets, neutral anchors, exact animation bindings, and explicit UI/audio/VFX/tile behavior.
+- Added locked indexed visual dimensions from 16×16 through 128×128, brief-bound recipes/cache/manifests/style approvals, stale-output pruning, legacy remediation, and Hypothesis properties for determinism, ordering, selective invalidation, and unsupported-input blocking.
+
 ## 1.3.0 — 2026-07-15
 
 - Added the `pixel-media-v1` capability pack and exhaustive blueprint-to-asset planning contracts.

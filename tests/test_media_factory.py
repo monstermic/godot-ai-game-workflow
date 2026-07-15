@@ -23,6 +23,8 @@ from aigame.generator import create_game
 from aigame.media import (
     MEDIA_STATES,
     MEDIA_TRANSITIONS,
+    _compile_recipe,
+    _collect_needs,
     assert_media_transition,
     benchmark_assets,
     compose_recipe,
@@ -34,6 +36,7 @@ from aigame.media import (
     sample_assets,
     validate_assets,
 )
+from tests.test_concept_blueprint import asset_specification_result, media_request_for_need
 
 
 def _write_json(path: Path, value: object) -> None:
@@ -125,6 +128,7 @@ class MediaFactoryTests(unittest.TestCase):
                 "id": "CNT-0001",
                 "canonical_name": "Cinder Runner",
                 "kind": "playable_character",
+                "mechanic_ids": ["MEC-0001"],
                 "launch_status": "must",
                 "required_assets": [
                     "character sprite",
@@ -137,6 +141,7 @@ class MediaFactoryTests(unittest.TestCase):
                 "id": "CNT-0002",
                 "canonical_name": "Brass Sentinel",
                 "kind": "enemy",
+                "mechanic_ids": ["MEC-0001"],
                 "launch_status": "must",
                 "required_assets": ["enemy sprite", "complete animation set", "attack particles"],
             },
@@ -213,6 +218,16 @@ class MediaFactoryTests(unittest.TestCase):
                 }
             ),
         )
+        media_contract = asset_specification_result(root)
+        _write_json(
+            root / "work/concept/MDR-0001.json",
+            _record({"id": "MDR-0001", **media_contract["media_direction"]}),
+        )
+        for request in media_contract["media_requests"]:
+            _write_json(
+                root / "work/concept/media_requests" / f"{request['id']}.json",
+                _record(request),
+            )
 
     def test_plan_is_exhaustive_schema_valid_and_deterministic(self) -> None:
         preview = plan_assets(self.root, apply=False)
@@ -228,10 +243,241 @@ class MediaFactoryTests(unittest.TestCase):
         self.assertIn("CNT-0001.required_assets[0]", sources)
         self.assertIn("MEC-0001.state.dash", sources)
         self.assertIn("BLU-0001.progression_arc.Broken Outskirts", sources)
+        pack_parts = [
+            json.loads(path.read_text(encoding="utf-8"))
+            for path in (self.root / "assets/source/packs/core-topdown-v1/parts").glob("PRT-*.json")
+        ]
         self.assertEqual(
-            6,
-            len(list((self.root / "assets/source/packs/core-topdown-v1/parts").glob("PRT-*.json"))),
+            {
+                "humanoid",
+                "serpentine",
+                "quadruped",
+                "winged",
+                "amorphous",
+                "mechanical_vehicle",
+            },
+            {
+                family
+                for part in pack_parts
+                for family in part["compatible_body_families"]
+            },
         )
+
+    def test_plan_is_blocked_when_an_approved_request_is_missing(self) -> None:
+        missing_path = next(
+            (self.root / "work/concept/media_requests").glob("ARQ-*.json")
+        )
+        missing_id = missing_path.stem
+        missing_path.unlink()
+        blocked = plan_assets(self.root, apply=False)
+        self.assertEqual("blocked", blocked["status"])
+        self.assertEqual("asset_specification", blocked["restart_stage"])
+        self.assertIn(missing_id, blocked["missing_request_ids"])
+        self.assertFalse((self.root / "work/assets/APL-0001.json").exists())
+
+    def test_malformed_animation_collections_block_before_recipes(self) -> None:
+        request_path = next(
+            path
+            for path in (self.root / "work/concept/media_requests").glob("ARQ-*.json")
+            if json.loads(path.read_text(encoding="utf-8"))["family"] == "animation"
+        )
+        request = json.loads(request_path.read_text(encoding="utf-8"))
+        request["specification"]["clips"] = "not-a-clip-list"
+        request.pop("input_fingerprint")
+        request["input_fingerprint"] = fingerprint(request)
+        _write_json(request_path, request)
+
+        blocked = plan_assets(self.root, apply=False)
+
+        self.assertEqual("blocked", blocked["status"])
+        self.assertEqual("asset_specification", blocked["restart_stage"])
+        self.assertTrue(any("clips" in error for error in blocked["errors"]))
+        self.assertFalse((self.root / "work/assets/APL-0001.json").exists())
+
+    def test_schema_invalid_request_blocks_before_semantic_validation(self) -> None:
+        request_path = next(
+            (self.root / "work/concept/media_requests").glob("ARQ-*.json")
+        )
+        request = json.loads(request_path.read_text(encoding="utf-8"))
+        request.pop("id")
+        request.pop("input_fingerprint")
+        request["input_fingerprint"] = fingerprint(request)
+        _write_json(request_path, request)
+
+        blocked = plan_assets(self.root, apply=False)
+
+        self.assertEqual("blocked", blocked["status"])
+        self.assertEqual("asset_specification", blocked["restart_stage"])
+        self.assertTrue(any("required property" in error for error in blocked["errors"]))
+        self.assertFalse((self.root / "work/assets/APL-0001.json").exists())
+
+    def test_malformed_family_contracts_always_block_without_crashing(self) -> None:
+        malformed_values = {
+            "tileset": ("stage_constraints", "not-an-object"),
+            "particle": ("event_timing", []),
+            "ui": ("contrast_ratio", "high"),
+            "sound": ("duration_seconds", "long"),
+            "ambience": ("envelope", []),
+            "music": ("stems", "single-track"),
+        }
+        request_paths = {
+            request["family"]: path
+            for path in (self.root / "work/concept/media_requests").glob("ARQ-*.json")
+            if (request := json.loads(path.read_text(encoding="utf-8")))["family"]
+            in malformed_values
+        }
+        for family, (field, malformed) in malformed_values.items():
+            with self.subTest(family=family):
+                path = request_paths[family]
+                original = json.loads(path.read_text(encoding="utf-8"))
+                changed = json.loads(json.dumps(original))
+                changed["specification"][field] = malformed
+                changed.pop("input_fingerprint")
+                changed["input_fingerprint"] = fingerprint(changed)
+                _write_json(path, changed)
+                try:
+                    blocked = plan_assets(self.root, apply=False)
+
+                    self.assertEqual("blocked", blocked["status"])
+                    self.assertTrue(any(field in error for error in blocked["errors"]))
+                    self.assertFalse((self.root / "work/assets/APL-0001.json").exists())
+                finally:
+                    _write_json(path, original)
+
+    def test_serpentine_request_never_selects_humanoid_parts(self) -> None:
+        request_path = next(
+            path
+            for path in (self.root / "work/concept/media_requests").glob("ARQ-*.json")
+            if "CNT-0001.required_assets[0]"
+            in json.loads(path.read_text(encoding="utf-8"))["source_refs"]
+        )
+        request = json.loads(request_path.read_text(encoding="utf-8"))
+        request["purpose"] = "human knight with legs, sword, and shield"
+        request["specification"].update(
+            {
+                "body_family": "serpentine",
+                "body_tags": ["elongated", "limbless"],
+                "surface_tags": ["scaled"],
+                "silhouette_tags": ["s_curve"],
+                "equipment_tags": [],
+            }
+        )
+        request["input_fingerprint"] = fingerprint(
+            {key: value for key, value in request.items() if key != "input_fingerprint"}
+        )
+        _write_json(request_path, request)
+        plan_assets(self.root, apply=True)
+        spec = next(
+            json.loads(path.read_text(encoding="utf-8"))
+            for path in (self.root / "work/assets/specs").glob("ASP-*.json")
+            if "CNT-0001.required_assets[0]" in json.loads(path.read_text(encoding="utf-8"))["source_refs"]
+        )
+        recipe = json.loads(
+            (self.root / "work/assets/recipes" / f"{spec['recipe_ids'][0]}.json").read_text(encoding="utf-8")
+        )
+        parts = [
+            json.loads((self.root / "work/assets/parts" / f"{part_id}.json").read_text(encoding="utf-8"))
+            for part_id in recipe["source_part_ids"]
+        ]
+        self.assertEqual("serpentine", recipe["parameters"]["body_family"])
+        self.assertTrue(parts)
+        self.assertTrue(
+            all(part["compatible_body_families"] == ["serpentine"] for part in parts)
+        )
+        self.assertFalse({"legs", "front_weapon"} & {part["slot"] for part in parts})
+        self.assertTrue(
+            all(
+                direction in part["direction_occupancy"]
+                for part in parts
+                for direction in ("down", "left", "right", "up")
+            )
+        )
+        humanoid_parts = [
+            json.loads(path.read_text(encoding="utf-8"))
+            for path in (self.root / "work/assets/parts").glob("PRT-*.json")
+            if "humanoid"
+            in json.loads(path.read_text(encoding="utf-8"))["compatible_body_families"]
+        ]
+        self.assertNotEqual(
+            {part["occupancy_signature"] for part in parts},
+            {part["occupancy_signature"] for part in humanoid_parts},
+        )
+
+    def test_visual_contracts_compile_at_128_pixels(self) -> None:
+        direction_path = self.root / "work/concept/MDR-0001.json"
+        direction = json.loads(direction_path.read_text(encoding="utf-8"))
+        direction["art"]["frame_size"] = [128, 128]
+        direction["art"]["tile_size"] = [128, 128]
+        direction["input_fingerprint"] = fingerprint(
+            {key: value for key, value in direction.items() if key != "input_fingerprint"}
+        )
+        _write_json(direction_path, direction)
+        for path in (self.root / "work/concept/media_requests").glob("ARQ-*.json"):
+            request = json.loads(path.read_text(encoding="utf-8"))
+            if request["family"] in {"sprite", "animation", "tileset", "particle", "ui"}:
+                request["specification"]["dimensions"] = [128, 128]
+                request["input_fingerprint"] = fingerprint(
+                    {key: value for key, value in request.items() if key != "input_fingerprint"}
+                )
+                _write_json(path, request)
+        self.assertEqual("passed", plan_assets(self.root, apply=True)["status"])
+        recipes = [
+            json.loads(path.read_text(encoding="utf-8"))
+            for path in (self.root / "work/assets/recipes").glob("RCP-*.json")
+        ]
+        for kind in ("sprite", "animation", "tileset", "particle", "ui"):
+            recipe = next(value for value in recipes if value["kind"] == kind)
+            compiled = _compile_recipe(self.root, recipe)["compiled"]
+            png = next(payload for path, payload in compiled.items() if path.endswith(".png"))
+            with Image.open(io.BytesIO(png)) as image:
+                if kind == "animation":
+                    expected = (
+                        128 * sum(clip["frames"] for clip in recipe["parameters"]["clips"]),
+                        128 * 4,
+                    )
+                elif kind == "tileset":
+                    expected = (128 * 16, 128 * 16)
+                else:
+                    expected = (128, 128)
+                self.assertEqual(expected, image.size, kind)
+            if kind in {"animation", "tileset"}:
+                resource = next(
+                    payload.decode("utf-8")
+                    for path, payload in compiled.items()
+                    if path.endswith(".tres")
+                )
+                self.assertIn("128", resource)
+
+    def test_every_supported_ui_subtype_has_an_explicit_renderer(self) -> None:
+        request_path = next(
+            path
+            for path in (self.root / "work/concept/media_requests").glob("ARQ-*.json")
+            if json.loads(path.read_text(encoding="utf-8"))["family"] == "ui"
+        )
+        hashes = set()
+        for subtype in ("icon", "cursor", "marker", "frame", "panel", "nine_slice"):
+            request = json.loads(request_path.read_text(encoding="utf-8"))
+            request["subtype"] = subtype
+            request["input_fingerprint"] = fingerprint(
+                {key: value for key, value in request.items() if key != "input_fingerprint"}
+            )
+            _write_json(request_path, request)
+            self.assertEqual("passed", plan_assets(self.root, apply=True)["status"])
+            spec = next(
+                json.loads(path.read_text(encoding="utf-8"))
+                for path in (self.root / "work/assets/specs").glob("ASP-*.json")
+                if json.loads(path.read_text(encoding="utf-8"))["request_id"] == request["id"]
+            )
+            recipe = json.loads(
+                (self.root / "work/assets/recipes" / f"{spec['recipe_ids'][0]}.json").read_text(encoding="utf-8")
+            )
+            png = next(
+                payload
+                for path, payload in _compile_recipe(self.root, recipe)["compiled"].items()
+                if path.endswith(".png")
+            )
+            hashes.add(hashlib.sha256(png).hexdigest())
+        self.assertEqual(6, len(hashes))
 
     def test_replanning_prunes_records_and_manifest_entries_removed_from_scope(self) -> None:
         set_automation_mode(self.root, "ai_staging", confirmation=AI_MODE_CONFIRMATION, apply=True)
@@ -245,6 +491,11 @@ class MediaFactoryTests(unittest.TestCase):
             for output in json.loads(path.read_text(encoding="utf-8"))["outputs"]
         }
         (self.root / "work/concept/content/CNT-0002.json").unlink()
+        self.assertEqual("blocked", plan_assets(self.root, apply=False)["status"])
+        for request_path in (self.root / "work/concept/media_requests").glob("ARQ-*.json"):
+            request = json.loads(request_path.read_text(encoding="utf-8"))
+            if any(str(source).startswith("CNT-0002.") for source in request["source_refs"]):
+                request_path.unlink()
         second = plan_assets(self.root, apply=True)
         self.assertLess(second["counts"]["recipes"], old_recipe_count)
         self.assertEqual(
@@ -428,6 +679,30 @@ class MediaFactoryTests(unittest.TestCase):
         self.assertEqual("CC-BY-4.0", recipe["parameters"]["output_license"])
         self.assertEqual([], validate_assets(self.root)["errors"])
 
+    def test_invalid_external_part_provenance_blocks_planning(self) -> None:
+        plan_assets(self.root, apply=True)
+        source = json.loads((self.root / "work/assets/parts/PRT-0002.json").read_text())
+        source.update(
+            {
+                "id": "PRT-1001",
+                "name": "Unlicensed External Variant",
+                "license": "unknown-license",
+                "provenance": {},
+            }
+        )
+        source.pop("input_fingerprint")
+        source["input_fingerprint"] = fingerprint(source)
+        _write_json(
+            self.root / "assets/source/packs/unapproved-external/parts/PRT-1001.json",
+            source,
+        )
+
+        blocked = plan_assets(self.root, apply=False)
+
+        self.assertEqual("blocked", blocked["status"])
+        self.assertEqual("asset_specification", blocked["restart_stage"])
+        self.assertTrue(any("External source part" in error for error in blocked["errors"]))
+
     def test_unsafe_recipe_output_is_rejected_before_writing(self) -> None:
         plan_assets(self.root, apply=True)
         recipe_path = self.root / "work/assets/recipes/RCP-0001.json"
@@ -586,6 +861,27 @@ class MediaFactoryTests(unittest.TestCase):
         content.pop("input_fingerprint")
         content["input_fingerprint"] = fingerprint(content)
         _write_json(content_path, content)
+        self.assertEqual("blocked", plan_assets(self.root, apply=False)["status"])
+        needs, _ = _collect_needs(self.root)
+        new_need = next(
+            need
+            for need in needs
+            if need["source_ref"] == "CNT-0002.required_assets[3]"
+        )
+        request = media_request_for_need(9999, new_need)
+        request["specification"]["clips"].append(
+            {
+                "name": "boss_phase_transformation",
+                "frames": 8,
+                "fps": 10,
+                "loop": False,
+                "events": [{"frame": 4, "event": "phase_change"}],
+            }
+        )
+        _write_json(
+            self.root / "work/concept/media_requests/ARQ-9999.json",
+            _record(request),
+        )
         plan_assets(self.root, apply=True)
         plan = json.loads((self.root / "work/assets/APL-0001.json").read_text(encoding="utf-8"))
         asset_id = next(
@@ -632,7 +928,7 @@ class MediaFactoryTests(unittest.TestCase):
         )
         recipe = json.loads(recipe_path.read_text(encoding="utf-8"))
         part = json.loads(part_path.read_text(encoding="utf-8"))
-        part["anchors"]["feet"] = [7, 13]
+        part["anchors"]["ground"] = [7, 13]
         part.pop("input_fingerprint")
         part["input_fingerprint"] = fingerprint(part)
         _write_json(part_path, part)
@@ -648,16 +944,20 @@ class MediaFactoryTests(unittest.TestCase):
         recipe_path = next(
             path
             for path in (self.root / "work/assets/recipes").glob("RCP-*.json")
-            if "PRT-0005" in json.loads(path.read_text(encoding="utf-8"))["source_part_ids"]
+            if "PRT-0002" in json.loads(path.read_text(encoding="utf-8"))["source_part_ids"]
         )
         recipe = json.loads(recipe_path.read_text(encoding="utf-8"))
-        part_path = self.root / "work/assets/parts/PRT-0005.json"
+        part_path = self.root / "work/assets/parts/PRT-0002.json"
         part = json.loads(part_path.read_text(encoding="utf-8"))
+        part["direction_pixels"] = {
+            direction: list(part["pixels"])
+            for direction in ("down", "left", "right", "up")
+        }
         part["direction_pixels"]["down"].append([0, 0, "safe"])
         part.pop("input_fingerprint")
         part["input_fingerprint"] = fingerprint(part)
         _write_json(part_path, part)
-        recipe["parameters"]["source_part_hashes"]["PRT-0005"] = part["input_fingerprint"]
+        recipe["parameters"]["source_part_hashes"]["PRT-0002"] = part["input_fingerprint"]
         recipe.pop("input_fingerprint")
         recipe["input_fingerprint"] = fingerprint(recipe)
         _write_json(recipe_path, recipe)
@@ -812,9 +1112,14 @@ func _initialize() -> void:
         if texture == null or cached != texture or composer.cache_size() != 1:
             failures += 1
             push_error("runtime composition or cache failed")
+        var large_recipe := {"parameters": {"frame_dimensions": [128, 128]}, "layers": [{"slot": "body", "part_id": "body", "offset": [0, 0]}]}
+        var large_texture = composer.compose(large_recipe, {"body": part}, 42)
+        if large_texture == null or large_texture.get_width() != 128 or large_texture.get_height() != 128:
+            failures += 1
+            push_error("runtime 128x128 composition failed")
         part.fill(Color("58c9a3"))
         var changed = composer.compose(recipe, {"body": part}, 42)
-        if changed == null or changed == texture or composer.cache_size() != 2:
+        if changed == null or changed == texture or composer.cache_size() != 3:
             failures += 1
             push_error("runtime cache key ignored changed source-part content")
         var runtime_recipes: Dictionary = value.get("runtime_recipes", {})

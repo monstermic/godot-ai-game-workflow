@@ -1,17 +1,89 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "AssetBrief",
-  "type": "object",
-  "required": ["schema_version", "id", "kind", "purpose", "runtime_path"],
-  "properties": {
-    "schema_version": {"const": "1.0"},
-    "id": {"type": "string", "pattern": "^AST-[0-9]{4}$"},
-    "kind": {"enum": ["image", "animation", "model", "font", "sound", "music", "voice", "video", "data"]},
-    "purpose": {"type": "string", "minLength": 1},
-    "runtime_path": {"type": "string", "minLength": 1},
-    "source_references": {"type": "array", "items": {"type": "string"}},
-    "constraints": {"type": "object"},
-    "license_allowlist": {"type": "array", "items": {"type": "string"}}
-  },
-  "additionalProperties": true
+  "oneOf": [
+    {
+      "type": "object",
+      "required": ["schema_version", "id", "kind", "purpose", "runtime_path"],
+      "properties": {
+        "schema_version": {"const": "1.0"},
+        "id": {"type": "string", "pattern": "^AST-[0-9]{4}$"},
+        "kind": {"enum": ["image", "animation", "model", "font", "sound", "music", "voice", "video", "data"]},
+        "purpose": {"type": "string", "minLength": 1},
+        "runtime_path": {"type": "string", "minLength": 1},
+        "source_references": {"type": "array", "items": {"type": "string"}},
+        "constraints": {"type": "object"},
+        "license_allowlist": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": true
+    },
+    {
+      "type": "object",
+      "required": ["schema_version", "id", "input_fingerprint", "family", "subtype", "purpose", "project_context", "request_id", "request_fingerprint", "source_refs", "dependencies", "references", "control", "specification", "output_contract", "accessibility", "acceptance_criteria", "license_allowlist"],
+      "properties": {
+        "schema_version": {"const": "2.0"},
+        "id": {"type": "string", "pattern": "^ABR-[0-9]{4}$"},
+        "input_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "family": {"enum": ["sprite", "animation", "tileset", "particle", "ui", "sound", "ambience", "music"]},
+        "subtype": {"type": "string", "minLength": 1},
+        "purpose": {"type": "string", "minLength": 1},
+        "request_id": {"type": "string", "pattern": "^ARQ-[0-9]{4}$"},
+        "request_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "project_context": {
+          "type": "object",
+          "required": ["media_direction_id", "media_direction_fingerprint"],
+          "properties": {
+            "media_direction_id": {"const": "MDR-0001"},
+            "media_direction_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+          },
+          "additionalProperties": true
+        },
+        "source_refs": {"type": "array", "items": {"type": "string"}, "minItems": 1, "uniqueItems": true},
+        "dependencies": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "references": {"$ref": "#/$defs/references"},
+        "control": {"$ref": "#/$defs/control"},
+        "specification": {"type": "object", "minProperties": 1},
+        "output_contract": {
+          "type": "object",
+          "required": ["runtime_paths", "runtime_formats", "metadata_format", "validation_profile"],
+          "properties": {
+            "runtime_paths": {"type": "array", "items": {"type": "string"}, "minItems": 1, "uniqueItems": true},
+            "runtime_formats": {"type": "array", "items": {"type": "string"}, "minItems": 1, "uniqueItems": true},
+            "metadata_format": {"type": "string"},
+            "validation_profile": {"const": "pixel-media-v1"}
+          },
+          "additionalProperties": true
+        },
+        "accessibility": {"type": "object"},
+        "acceptance_criteria": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "license_allowlist": {"type": "array", "items": {"type": "string"}, "minItems": 1, "uniqueItems": true}
+      },
+      "additionalProperties": true
+    }
+  ],
+  "$defs": {
+    "references": {
+      "type": "object",
+      "required": ["canonical", "structural", "stylistic", "negative"],
+      "properties": {
+        "canonical": {"type": "array", "items": {"type": "string"}},
+        "structural": {"type": "array", "items": {"type": "string"}},
+        "stylistic": {"type": "array", "items": {"type": "string"}},
+        "negative": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": false
+    },
+    "control": {
+      "type": "object",
+      "required": ["locked", "variable", "generator_decides", "negative_constraints", "seed"],
+      "properties": {
+        "locked": {"type": "array", "items": {"type": "string"}},
+        "variable": {"type": "array", "items": {"type": "string"}},
+        "generator_decides": {"type": "array", "items": {"type": "string"}},
+        "negative_constraints": {"type": "array", "items": {"type": "string"}},
+        "seed": {"type": "integer"}
+      },
+      "additionalProperties": false
+    }
+  }
 }

@@ -1,8 +1,8 @@
 # Media policy
 
-The `pixel-media-v1` factory derives an exhaustive `AssetPlan` from the approved blueprint before implementation. It compiles indexed 16x16 sprites, four-direction animation sets, terrain-mask atlases, particles, UI, 48 kHz SFX/ambience, and adaptive music stems from pinned source parts and seeded recipes. Optional AI providers may create approved source parts only; bulk and runtime composition remain local and deterministic.
+The `pixel-media-v1` factory derives an exhaustive `AssetPlan` from approved `MDR-0001` media direction and `ARQ-####` requests before implementation. It compiles indexed 16–128 px sprites, four-direction animation sets, terrain-mask atlases, particles, UI, 48 kHz SFX/ambience, and adaptive music stems from pinned source parts and seeded recipes. Free-text purpose never selects a renderer or actor family. Optional AI providers may create approved source parts only; bulk and runtime composition remain local and deterministic.
 
-Use procedural placeholders during discovery and prototypes. Human-gated projects approve representative character, enemy, tile, particle, UI, SFX, and music samples before batches. AI-staging projects record the same checksum-bound gate as an agent approval.
+Use procedural placeholders during discovery and prototypes. Human-gated projects approve a fingerprint-bound bundle covering every used actor family and active visual/audio subtype before batches. AI-staging projects record the same checksum-bound gate as an agent approval.
 
 Default preference is existing procedural content, verified CC0, then an explicitly configured generator. Original, CC0-1.0, CC-BY-4.0, compatible commercial, proprietary, and Apache-2.0 records are accepted. Unknown, unverifiable, non-commercial, and no-derivatives terms are blocked by default.
 

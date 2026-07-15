@@ -1,0 +1,3 @@
+# Asset specification task
+
+Create the approved global media direction and exhaustive structured media requests for every required blueprint source. Use explicit pixel-media family and subtype fields; a free-text purpose may explain intent but must never select a renderer, sprite family, animation, timing, or output shape. Preserve the fixed 16x16 top-down visual contract, 48 kHz/16-bit audio contract, accessibility alternatives, output metadata, provenance, and CPU budgets. If the built-in pack cannot satisfy a requested family or feature, declare the missing capability instead of substituting an unrelated asset.

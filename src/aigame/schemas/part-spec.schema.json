@@ -15,18 +15,37 @@
     "slot": {"type": "string", "minLength": 1},
     "pixels": {"type": "array", "items": {"type": "array", "prefixItems": [{"type": "integer", "minimum": 0, "maximum": 15}, {"type": "integer", "minimum": 0, "maximum": 15}, {"type": "string", "minLength": 1}], "items": false}, "minItems": 1},
     "anchors": {
-      "type": "object",
-      "required": ["origin", "feet", "head", "main_hand", "off_hand", "muzzle", "effect"],
-      "properties": {
-        "origin": {"$ref": "#/$defs/point"},
-        "feet": {"$ref": "#/$defs/point"},
-        "head": {"$ref": "#/$defs/point"},
-        "main_hand": {"$ref": "#/$defs/point"},
-        "off_hand": {"$ref": "#/$defs/point"},
-        "muzzle": {"$ref": "#/$defs/point"},
-        "effect": {"$ref": "#/$defs/point"}
-      },
-      "additionalProperties": false
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["origin", "ground", "center", "head", "action_primary", "action_secondary", "projectile", "effect"],
+          "properties": {
+            "origin": {"$ref": "#/$defs/point"},
+            "ground": {"$ref": "#/$defs/point"},
+            "center": {"$ref": "#/$defs/point"},
+            "head": {"$ref": "#/$defs/point"},
+            "action_primary": {"$ref": "#/$defs/point"},
+            "action_secondary": {"$ref": "#/$defs/point"},
+            "projectile": {"$ref": "#/$defs/point"},
+            "effect": {"$ref": "#/$defs/point"}
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["origin", "feet", "head", "main_hand", "off_hand", "muzzle", "effect"],
+          "properties": {
+            "origin": {"$ref": "#/$defs/point"},
+            "feet": {"$ref": "#/$defs/point"},
+            "head": {"$ref": "#/$defs/point"},
+            "main_hand": {"$ref": "#/$defs/point"},
+            "off_hand": {"$ref": "#/$defs/point"},
+            "muzzle": {"$ref": "#/$defs/point"},
+            "effect": {"$ref": "#/$defs/point"}
+          },
+          "additionalProperties": false
+        }
+      ]
     },
     "occupancy_mask": {"type": "array", "items": {"$ref": "#/$defs/maskPoint"}, "minItems": 1},
     "occlusion_mask": {"type": "array", "items": {"$ref": "#/$defs/maskPoint"}},
@@ -34,6 +53,18 @@
     "compatible_animations": {"type": "array", "items": {"type": "string"}, "minItems": 1},
     "compatible_directions": {"type": "array", "items": {"enum": ["down", "left", "right", "up"]}, "minItems": 1, "uniqueItems": true},
     "mirror_safe": {"type": "boolean"},
+    "direction_occupancy": {
+      "type": "object",
+      "required": ["down", "left", "right", "up"],
+      "properties": {
+        "down": {"type": "array", "items": {"$ref": "#/$defs/maskPoint"}},
+        "left": {"type": "array", "items": {"$ref": "#/$defs/maskPoint"}},
+        "right": {"type": "array", "items": {"$ref": "#/$defs/maskPoint"}},
+        "up": {"type": "array", "items": {"$ref": "#/$defs/maskPoint"}}
+      },
+      "additionalProperties": false
+    },
+    "tags": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
     "license": {"enum": ["original", "CC0-1.0", "CC-BY-4.0", "Apache-2.0", "proprietary", "commercial"]},
     "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "provenance": {"type": "object", "minProperties": 1}

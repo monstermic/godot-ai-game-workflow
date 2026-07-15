@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "MediaRecipe",
   "type": "object",
-  "required": ["schema_version", "id", "revision", "status", "created_at", "updated_at", "input_fingerprint", "kind", "asset_spec_id", "seed", "source_part_ids", "parameters", "outputs"],
+  "required": ["schema_version", "id", "revision", "status", "created_at", "updated_at", "input_fingerprint", "kind", "asset_spec_id", "brief_id", "brief_fingerprint", "seed", "source_part_ids", "parameters", "outputs"],
   "properties": {
     "schema_version": {"const": "1.0"},
     "id": {"type": "string", "pattern": "^RCP-[0-9]{4}$"},
@@ -13,6 +13,8 @@
     "input_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "kind": {"enum": ["sprite", "animation", "tileset", "particle", "ui", "sound", "ambience", "music"]},
     "asset_spec_id": {"type": "string", "pattern": "^ASP-[0-9]{4}$"},
+    "brief_id": {"type": "string", "pattern": "^ABR-[0-9]{4}$"},
+    "brief_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "seed": {"type": "integer"},
     "source_part_ids": {"type": "array", "items": {"type": "string", "pattern": "^PRT-[0-9]{4}$"}, "uniqueItems": true},
     "parameters": {"type": "object"},

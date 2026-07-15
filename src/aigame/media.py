@@ -105,8 +105,64 @@ SCHEMA_BY_PREFIX = {
     "SND": "sound-spec.schema.json",
     "RCP": "media-recipe.schema.json",
 }
+BODY_FAMILY_DEFINITIONS = {
+    "humanoid": {
+        "required_slots": ["shadow", "body", "legs", "head"],
+        "forbidden_slots": [],
+        "allowed_tags": ["biped", "cloth", "upright", "weapon", "magic"],
+        "occupancy_signature": "upright_two_leg",
+    },
+    "serpentine": {
+        "required_slots": ["shadow", "body", "head"],
+        "forbidden_slots": ["legs", "front_weapon", "offhand"],
+        "allowed_tags": ["elongated", "limbless", "scaled", "s_curve"],
+        "occupancy_signature": "continuous_s_curve",
+    },
+    "quadruped": {
+        "required_slots": ["shadow", "body", "legs", "head"],
+        "forbidden_slots": ["front_weapon", "offhand"],
+        "allowed_tags": ["four_legged", "furred", "low_profile"],
+        "occupancy_signature": "four_contact_low_body",
+    },
+    "winged": {
+        "required_slots": ["shadow", "rear_effect", "body", "head"],
+        "forbidden_slots": ["legs", "front_weapon", "offhand"],
+        "allowed_tags": ["winged", "feathered", "wide_span"],
+        "occupancy_signature": "bilateral_wing_span",
+    },
+    "amorphous": {
+        "required_slots": ["shadow", "body"],
+        "forbidden_slots": ["legs", "head", "front_weapon", "offhand"],
+        "allowed_tags": ["blob", "gelatinous", "irregular"],
+        "occupancy_signature": "single_irregular_mass",
+    },
+    "mechanical_vehicle": {
+        "required_slots": ["shadow", "body", "torso"],
+        "forbidden_slots": ["legs", "head", "front_weapon", "offhand"],
+        "allowed_tags": ["wheeled", "metal", "chassis"],
+        "occupancy_signature": "wide_chassis",
+    },
+}
+NEUTRAL_ANCHORS = [
+    "origin",
+    "ground",
+    "center",
+    "head",
+    "action_primary",
+    "action_secondary",
+    "projectile",
+    "effect",
+]
+LEGACY_ANCHOR_MAP = {
+    "feet": "ground",
+    "main_hand": "action_primary",
+    "off_hand": "action_secondary",
+    "muzzle": "projectile",
+}
 STYLE_GENERATION_FIELDS = (
     "grid_size",
+    "frame_size",
+    "tile_size",
     "perspective",
     "directions",
     "palette",
@@ -117,6 +173,7 @@ STYLE_GENERATION_FIELDS = (
     "animation_defaults",
     "audio_vocabulary",
     "blueprint_fingerprint",
+    "media_direction_fingerprint",
 )
 MEDIA_TERMS = re.compile(
     r"\b(visual|audiovisual|animation|sprite|portrait|icon|ui|hud|menu|cursor|tile|terrain|"
@@ -305,8 +362,13 @@ def _kind_for(text: str, *, hint: str = "") -> str:
     return "sprite"
 
 
-def _collect_needs(project: Path) -> tuple[list[dict[str, Any]], str]:
-    _require_finalized_blueprint(project)
+def _collect_needs(
+    project: Path,
+    *,
+    require_finalized: bool = True,
+) -> tuple[list[dict[str, Any]], str]:
+    if require_finalized:
+        _require_finalized_blueprint(project)
     needs: list[dict[str, Any]] = []
     content = _concept_records(project, "content", "CNT-*.json")
     mechanics = _concept_records(project, "mechanics", "MEC-*.json")
@@ -465,6 +527,7 @@ def _collect_needs(project: Path) -> tuple[list[dict[str, Any]], str]:
     requirement_records = [
         _load_json(path)
         for path in sorted((project / "work" / "requirements").glob("REQ-*.json"))
+        if "materialization_key" not in _load_json(path)
     ]
     for requirement in requirement_records:
         if requirement.get("status") == "deprecated":
@@ -524,28 +587,147 @@ def _collect_needs(project: Path) -> tuple[list[dict[str, Any]], str]:
     return canonical, fingerprint(source_material)
 
 
-def _style_record(blueprint_fingerprint: str) -> dict[str, Any]:
+def _structured_media_contract(
+    project: Path,
+    needs: list[dict[str, Any]],
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]], dict[str, Any] | None]:
+    direction_path = project / "work" / "concept" / "MDR-0001.json"
+    request_paths = sorted(
+        (project / "work" / "concept" / "media_requests").glob("ARQ-*.json")
+    )
+    errors: list[str] = []
+    missing_fields: list[str] = []
+    schemas_valid = True
+    direction: dict[str, Any] | None = None
+    if not direction_path.is_file():
+        schemas_valid = False
+        errors.append("MDR-0001 media direction is missing")
+        missing_fields.append("MDR-0001")
+    else:
+        try:
+            direction = _load_json(direction_path)
+        except WorkflowError as error:
+            schemas_valid = False
+            errors.append(str(error))
+        else:
+            direction_errors = _schema_errors(direction, "media-direction.schema.json")
+            schemas_valid = schemas_valid and not direction_errors
+            errors.extend(f"MDR-0001: {message}" for message in direction_errors)
+            missing_fields.extend(f"MDR-0001:{message.split(':', 1)[0]}" for message in direction_errors)
+            if not _validate_fingerprint(direction):
+                errors.append("MDR-0001: input fingerprint does not match current content")
+            if direction.get("status") != "approved":
+                errors.append("MDR-0001: media direction is not approved")
+    requests: list[dict[str, Any]] = []
+    for path in request_paths:
+        try:
+            request = _load_json(path)
+        except WorkflowError as error:
+            schemas_valid = False
+            errors.append(str(error))
+            continue
+        request_id = str(request.get("id", path.stem))
+        request_errors = _schema_errors(request, "media-request.schema.json")
+        schemas_valid = schemas_valid and not request_errors
+        errors.extend(f"{request_id}: {message}" for message in request_errors)
+        missing_fields.extend(
+            f"{request_id}:{message.split(':', 1)[0]}" for message in request_errors
+        )
+        if not _validate_fingerprint(request):
+            errors.append(f"{request_id}: input fingerprint does not match current content")
+        if request.get("status") != "approved":
+            errors.append(f"{request_id}: media request is not approved")
+        requests.append(request)
+    mapped: dict[str, list[str]] = {}
+    for request in requests:
+        for source_ref in request.get("source_refs", []):
+            mapped.setdefault(str(source_ref), []).append(str(request.get("id")))
+    expected_sources = {str(need["source_ref"]) for need in needs}
+    missing_request_ids = [
+        f"ARQ-{index:04d}"
+        for index, need in enumerate(needs, 1)
+        if str(need["source_ref"]) not in mapped
+    ]
+    for source_ref in sorted(expected_sources - set(mapped)):
+        errors.append(f"unmapped blueprint media source {source_ref}")
+    for source_ref in sorted(set(mapped) - expected_sources):
+        errors.append(f"stale blueprint media source {source_ref}")
+    for source_ref, request_ids in sorted(mapped.items()):
+        if len(request_ids) != 1:
+            errors.append(
+                f"duplicate blueprint media source {source_ref}: {', '.join(request_ids)}"
+            )
+    if schemas_valid and direction is not None and requests:
+        try:
+            from .concept import _media_contract_errors
+
+            errors.extend(_media_contract_errors(project, direction, requests))
+        except (ImportError, AttributeError, KeyError, TypeError, ValueError) as error:
+            errors.append(f"Could not validate structured media contracts: {error}")
+    if errors:
+        return direction, requests, {
+            "schema_version": SCHEMA_VERSION,
+            "status": "blocked",
+            "operation": "plan",
+            "restart_stage": "asset_specification",
+            "missing_request_ids": sorted(set(missing_request_ids)),
+            "missing_fields": sorted(set(missing_fields)),
+            "errors": sorted(set(errors)),
+        }
+    return direction, requests, None
+
+
+def _planning_requests(
+    needs: list[dict[str, Any]],
+    requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    need_by_source = {str(need["source_ref"]): need for need in needs}
+    planned: list[dict[str, Any]] = []
+    for request in sorted(requests, key=lambda value: str(value["id"])):
+        sources = sorted(map(str, request["source_refs"]))
+        planned.append(
+            {
+                "source_ref": sources[0],
+                "source_refs": sources,
+                "purpose": str(request["purpose"]),
+                "kind": str(request["family"]),
+                "required": any(bool(need_by_source[source]["required"]) for source in sources),
+                "request": request,
+            }
+        )
+    return planned
+
+
+def _style_record(
+    blueprint_fingerprint: str,
+    direction: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    art = (direction or {}).get("art", {})
+    audio = (direction or {}).get("audio", {})
+    palette = art.get("palette") or {
+        "transparent": "#00000000",
+        "outline": "#171526ff",
+        "shadow": "#29243dff",
+        "dark": "#45415fff",
+        "mid": "#6f6a8aff",
+        "light": "#b7b2d0ff",
+        "primary": "#e66b3dff",
+        "secondary": "#f7c95cff",
+        "danger": "#d94b64ff",
+        "safe": "#58c9a3ff",
+    }
     return _record(
         {
-            "name": "Core Top-down Pixel Media v1",
+            "name": "Core Top-down Pixel Media v1 (16-128 px)",
             "grid_size": 16,
+            "frame_size": art.get("frame_size", [16, 16]),
+            "tile_size": art.get("tile_size", [16, 16]),
             "perspective": "top_down",
             "directions": DIRECTIONS,
-            "palette": {
-                "transparent": "#00000000",
-                "outline": "#171526ff",
-                "shadow": "#29243dff",
-                "dark": "#45415fff",
-                "mid": "#6f6a8aff",
-                "light": "#b7b2d0ff",
-                "primary": "#e66b3dff",
-                "secondary": "#f7c95cff",
-                "danger": "#d94b64ff",
-                "safe": "#58c9a3ff",
-            },
+            "palette": palette,
             "layer_slots": LAYER_SLOTS,
-            "outline": {"width_pixels": 1, "selective": True},
-            "lighting": {"direction": "upper_left", "levels": 3},
+            "outline": {"description": art.get("outline", "one logical pixel"), "width_pixels": 1, "selective": True},
+            "lighting": {"direction": art.get("light_direction", "upper_left"), "levels": 3},
             "silhouettes": {"minimum_negative_space_pixels": 2},
             "animation_defaults": {clip["name"]: clip for clip in BASELINE_CLIPS},
             "audio_vocabulary": {
@@ -555,8 +737,11 @@ def _style_record(blueprint_fingerprint: str) -> dict[str, Any]:
                 "bpm": 120,
                 "key": "A minor",
                 "bars": 4,
+                "identity": audio.get("identity", "mechanical pixel media"),
             },
             "blueprint_fingerprint": blueprint_fingerprint,
+            "media_direction_id": (direction or {}).get("id"),
+            "media_direction_fingerprint": (direction or {}).get("input_fingerprint"),
         },
         record_id="STY-0001",
         status="draft",
@@ -573,62 +758,78 @@ def _style_generation_fingerprint(style: dict[str, Any]) -> str:
 
 def _part_records(style: dict[str, Any]) -> list[dict[str, Any]]:
     templates = [
-        ("shadow", [[5, 13, "shadow"], [6, 13, "shadow"], [7, 13, "shadow"], [8, 13, "shadow"], [9, 13, "shadow"], [10, 13, "shadow"]]),
-        ("body", [[7, 6, "primary"], [8, 6, "primary"], [6, 7, "primary"], [7, 7, "light"], [8, 7, "primary"], [9, 7, "primary"]]),
-        ("legs", [[6, 10, "dark"], [7, 10, "dark"], [8, 10, "dark"], [9, 10, "dark"], [6, 11, "mid"], [9, 11, "mid"]]),
-        ("head", [[7, 4, "light"], [8, 4, "light"], [6, 5, "mid"], [7, 5, "light"], [8, 5, "light"], [9, 5, "mid"]]),
-        ("front_weapon", [[10, 7, "secondary"], [11, 7, "secondary"], [12, 7, "light"], [13, 7, "light"]]),
-        ("front_effect", [[11, 6, "danger"], [12, 5, "secondary"], [13, 4, "light"]]),
+        ("humanoid", "shadow", [[5, 13, "shadow"], [6, 13, "shadow"], [7, 13, "shadow"], [8, 13, "shadow"], [9, 13, "shadow"], [10, 13, "shadow"]], ["biped", "upright"], True),
+        ("humanoid", "body", [[6, 7, "primary"], [7, 6, "light"], [8, 6, "primary"], [9, 7, "primary"], [7, 8, "primary"], [8, 8, "primary"]], ["biped", "cloth", "upright"], True),
+        ("humanoid", "legs", [[6, 10, "dark"], [7, 10, "dark"], [8, 10, "dark"], [9, 10, "dark"], [6, 11, "mid"], [9, 11, "mid"]], ["biped", "cloth", "upright"], True),
+        ("humanoid", "head", [[7, 4, "light"], [8, 4, "light"], [6, 5, "mid"], [7, 5, "light"], [8, 5, "light"], [9, 5, "mid"]], ["biped", "upright"], True),
+        ("humanoid", "front_weapon", [[10, 7, "secondary"], [11, 7, "secondary"], [12, 7, "light"], [13, 7, "light"]], ["weapon"], False),
+        ("humanoid", "front_effect", [[11, 6, "danger"], [12, 5, "secondary"], [13, 4, "light"]], ["magic"], False),
+        ("serpentine", "shadow", [[3, 13, "shadow"], [4, 13, "shadow"], [5, 13, "shadow"], [6, 13, "shadow"], [7, 13, "shadow"], [8, 13, "shadow"], [9, 13, "shadow"], [10, 13, "shadow"], [11, 13, "shadow"], [12, 13, "shadow"]], ["elongated", "limbless", "s_curve"], True),
+        ("serpentine", "body", [[4, 11, "primary"], [5, 11, "light"], [6, 10, "primary"], [7, 9, "primary"], [8, 9, "light"], [9, 10, "primary"], [10, 11, "primary"], [11, 11, "mid"], [12, 10, "mid"], [3, 12, "dark"], [4, 12, "primary"]], ["elongated", "limbless", "scaled", "s_curve"], True),
+        ("serpentine", "head", [[7, 6, "light"], [8, 6, "light"], [6, 7, "primary"], [7, 7, "primary"], [8, 7, "primary"], [9, 7, "primary"], [9, 6, "outline"]], ["elongated", "limbless", "scaled", "s_curve"], True),
+        ("quadruped", "shadow", [[3, 12, "shadow"], [4, 12, "shadow"], [5, 12, "shadow"], [6, 12, "shadow"], [7, 12, "shadow"], [8, 12, "shadow"], [9, 12, "shadow"], [10, 12, "shadow"], [11, 12, "shadow"], [12, 12, "shadow"]], ["four_legged", "low_profile"], True),
+        ("quadruped", "body", [[4, 7, "primary"], [5, 7, "light"], [6, 7, "primary"], [7, 7, "primary"], [8, 7, "primary"], [9, 7, "primary"], [10, 7, "dark"], [4, 8, "primary"], [5, 8, "primary"], [6, 8, "primary"], [7, 8, "primary"], [8, 8, "primary"], [9, 8, "primary"], [10, 8, "dark"]], ["four_legged", "furred", "low_profile"], True),
+        ("quadruped", "legs", [[4, 9, "dark"], [4, 10, "mid"], [6, 9, "dark"], [6, 10, "mid"], [9, 9, "dark"], [9, 10, "mid"], [11, 9, "dark"], [11, 10, "mid"]], ["four_legged", "furred", "low_profile"], True),
+        ("quadruped", "head", [[11, 6, "light"], [12, 6, "primary"], [11, 7, "primary"], [12, 7, "primary"], [13, 7, "outline"]], ["four_legged", "furred", "low_profile"], True),
+        ("winged", "shadow", [[4, 13, "shadow"], [5, 13, "shadow"], [6, 13, "shadow"], [7, 13, "shadow"], [8, 13, "shadow"], [9, 13, "shadow"], [10, 13, "shadow"], [11, 13, "shadow"]], ["winged", "wide_span"], True),
+        ("winged", "rear_effect", [[1, 6, "mid"], [2, 5, "light"], [3, 6, "mid"], [4, 7, "primary"], [11, 7, "primary"], [12, 6, "mid"], [13, 5, "light"], [14, 6, "mid"]], ["winged", "feathered", "wide_span"], True),
+        ("winged", "body", [[7, 7, "primary"], [8, 7, "primary"], [6, 8, "primary"], [7, 8, "light"], [8, 8, "primary"], [9, 8, "primary"]], ["winged", "feathered", "wide_span"], True),
+        ("winged", "head", [[7, 5, "light"], [8, 5, "light"], [7, 6, "primary"], [8, 6, "primary"], [9, 6, "outline"]], ["winged", "feathered", "wide_span"], True),
+        ("amorphous", "shadow", [[4, 13, "shadow"], [5, 13, "shadow"], [6, 13, "shadow"], [7, 13, "shadow"], [8, 13, "shadow"], [9, 13, "shadow"], [10, 13, "shadow"], [11, 13, "shadow"]], ["blob", "irregular"], True),
+        ("amorphous", "body", [[5, 8, "primary"], [6, 7, "primary"], [7, 6, "light"], [8, 7, "primary"], [9, 6, "primary"], [10, 8, "primary"], [4, 10, "dark"], [5, 9, "primary"], [6, 9, "primary"], [7, 9, "light"], [8, 9, "primary"], [9, 9, "primary"], [10, 9, "primary"], [11, 10, "dark"], [5, 11, "mid"], [6, 11, "mid"], [7, 11, "mid"], [8, 11, "mid"], [9, 11, "mid"], [10, 11, "mid"]], ["blob", "gelatinous", "irregular"], True),
+        ("mechanical_vehicle", "shadow", [[2, 13, "shadow"], [3, 13, "shadow"], [4, 13, "shadow"], [5, 13, "shadow"], [6, 13, "shadow"], [7, 13, "shadow"], [8, 13, "shadow"], [9, 13, "shadow"], [10, 13, "shadow"], [11, 13, "shadow"], [12, 13, "shadow"], [13, 13, "shadow"]], ["wheeled", "chassis"], True),
+        ("mechanical_vehicle", "body", [[3, 8, "dark"], [4, 7, "primary"], [5, 7, "primary"], [6, 7, "primary"], [7, 7, "light"], [8, 7, "primary"], [9, 7, "primary"], [10, 7, "primary"], [11, 8, "dark"], [3, 9, "mid"], [4, 9, "primary"], [5, 9, "primary"], [6, 9, "primary"], [7, 9, "primary"], [8, 9, "primary"], [9, 9, "primary"], [10, 9, "primary"], [11, 9, "mid"]], ["wheeled", "metal", "chassis"], True),
+        ("mechanical_vehicle", "torso", [[5, 5, "dark"], [6, 5, "mid"], [7, 5, "light"], [8, 5, "mid"], [9, 5, "dark"], [6, 6, "primary"], [7, 6, "primary"], [8, 6, "primary"]], ["wheeled", "metal", "chassis"], True),
     ]
+    anchors = {
+        "origin": [8, 8],
+        "ground": [8, 13],
+        "center": [8, 8],
+        "head": [8, 4],
+        "action_primary": [10, 8],
+        "action_secondary": [5, 8],
+        "projectile": [14, 7],
+        "effect": [12, 6],
+    }
     records = []
-    for index, (slot, pixels) in enumerate(templates, 1):
-        direction_pixels = None
-        if slot in {"front_weapon", "front_effect"}:
-            direction_pixels = {
-                "down": pixels,
-                "up": [[x, max(0, y - 2), color] for x, y, color in pixels],
-                "left": [[max(0, 15 - x), y, color] for x, y, color in pixels],
-                "right": pixels,
+    for index, (family, slot, pixels, tags, required) in enumerate(templates, 1):
+        coordinates = sorted({(int(pixel[0]), int(pixel[1])) for pixel in pixels})
+        direction_occupancy = {
+            "down": [[x, y] for x, y in coordinates],
+            "left": [[15 - x, y] for x, y in coordinates],
+            "right": [[x, y] for x, y in coordinates],
+            "up": [[x, max(0, y - 1)] for x, y in coordinates],
+        }
+        occupancy = sorted(
+            {
+                (int(point[0]), int(point[1]))
+                for points in direction_occupancy.values()
+                for point in points
             }
-        occupancy_pixels = list(pixels)
-        if direction_pixels:
-            occupancy_pixels = [
-                [x, y]
-                for x, y in sorted(
-                    {
-                        (int(pixel[0]), int(pixel[1]))
-                        for directional_pixels in direction_pixels.values()
-                        for pixel in directional_pixels
-                    }
-                )
-            ]
+        )
         records.append(
             _record(
                 {
-                    "name": f"Core {slot.replace('_', ' ').title()}",
+                    "name": f"Core {family.replace('_', ' ').title()} {slot.replace('_', ' ').title()}",
                     "slot": slot,
                     "pixels": pixels,
-                    "anchors": {
-                        "origin": [8, 8],
-                        "feet": [8, 13],
-                        "head": [8, 4],
-                        "main_hand": [10, 8],
-                        "off_hand": [5, 8],
-                        "muzzle": [14, 7],
-                        "effect": [12, 6],
-                    },
-                    "occupancy_mask": occupancy_pixels,
+                    "anchors": anchors,
+                    "occupancy_mask": [[x, y] for x, y in occupancy],
+                    "direction_occupancy": direction_occupancy,
+                    "occupancy_signature": BODY_FAMILY_DEFINITIONS[family]["occupancy_signature"],
                     "occlusion_mask": [],
-                    "compatible_body_families": ["humanoid", "compact_enemy"],
-                    "compatible_animations": [*[clip["name"] for clip in BASELINE_CLIPS], "*"],
+                    "compatible_body_families": [family],
+                    "compatible_animations": ["*"],
                     "compatible_directions": DIRECTIONS,
-                    "mirror_safe": slot not in {"front_weapon", "front_effect"},
-                    "direction_pixels": direction_pixels,
+                    "mirror_safe": True,
+                    "direction_pixels": None,
+                    "tags": tags,
+                    "required_for_family": required,
                     "license": "CC0-1.0",
-                    "sha256": fingerprint({"style": style["input_fingerprint"], "pixels": pixels}),
+                    "sha256": fingerprint({"style": style["input_fingerprint"], "family": family, "pixels": pixels}),
                     "provenance": {
                         "method": "original procedural coordinates",
-                        "source_pack": "core-topdown-v1",
+                        "source_pack": "core-topdown-v2",
                     },
                 },
                 record_id=f"PRT-{index:04d}",
@@ -692,6 +893,63 @@ def _external_part_records(project: Path, builtin_ids: set[str]) -> list[dict[st
     return records
 
 
+def _external_body_family_definitions(project: Path) -> dict[str, dict[str, Any]]:
+    definitions: dict[str, dict[str, Any]] = {}
+    allowed_licenses = {
+        "original",
+        "CC0-1.0",
+        "CC-BY-4.0",
+        "Apache-2.0",
+        "proprietary",
+        "commercial",
+    }
+    packs_root = project / "assets" / "source" / "packs"
+    for path in sorted(packs_root.glob("*/pack.json")):
+        if path.parent.name == "core-topdown-v1":
+            continue
+        pack = _load_json(path)
+        family_values = pack.get("body_families")
+        if not isinstance(family_values, dict):
+            continue
+        pack_id = str(pack.get("id", path.parent.name))
+        material = {key: value for key, value in pack.items() if key != "sha256"}
+        if (
+            pack.get("status") != "approved"
+            or pack.get("license") not in allowed_licenses
+            or pack.get("sha256") != fingerprint(material)
+            or not isinstance(pack.get("provenance"), (dict, str))
+        ):
+            raise WorkflowError(
+                f"External source pack {pack_id} is not approved or has invalid license/provenance/checksum"
+            )
+        for family, value in family_values.items():
+            family_name = str(family)
+            if family_name in BODY_FAMILY_DEFINITIONS or family_name in definitions:
+                raise WorkflowError(
+                    f"External source pack {pack_id} duplicates body family {family_name}"
+                )
+            if not isinstance(value, dict):
+                raise WorkflowError(f"External body family {family_name} must be an object")
+            required = {
+                "required_slots",
+                "forbidden_slots",
+                "allowed_tags",
+                "occupancy_signature",
+            }
+            if required - set(value):
+                raise WorkflowError(
+                    f"External body family {family_name} is incomplete: {sorted(required - set(value))}"
+                )
+            definitions[family_name] = {
+                "required_slots": list(map(str, value["required_slots"])),
+                "forbidden_slots": list(map(str, value["forbidden_slots"])),
+                "allowed_tags": list(map(str, value["allowed_tags"])),
+                "occupancy_signature": str(value["occupancy_signature"]),
+                "source_pack": pack_id,
+            }
+    return definitions
+
+
 def _effective_output_license(parts: list[dict[str, Any]]) -> str:
     licenses = {str(part.get("license")) for part in parts}
     for candidate in ("proprietary", "commercial", "CC-BY-4.0", "original", "Apache-2.0"):
@@ -700,33 +958,14 @@ def _effective_output_license(parts: list[dict[str, Any]]) -> str:
     return "CC0-1.0"
 
 
-def _body_family_for_need(need: dict[str, Any]) -> str:
-    value = f"{need.get('source_ref', '')} {need.get('purpose', '')}".lower()
-    return "compact_enemy" if any(word in value for word in ("enemy", "boss", "sentinel")) else "humanoid"
-
-
-def _extra_animation_clip(need: dict[str, Any]) -> str | None:
-    source_ref = str(need.get("source_ref", ""))
-    if ".state." in source_ref:
-        return _slug(source_ref.split(".state.", 1)[1]).replace("-", "_")
-    if not source_ref.startswith("CNT-"):
-        return None
-    phrase = str(need.get("purpose", "")).split(":", 1)[-1].lower()
-    if "animation" not in phrase and "clip" not in phrase:
-        return None
-    phrase = re.sub(r"\b(complete|full|baseline|animation|animations|clip|clips|set)\b", " ", phrase)
-    phrase = re.sub(r"\s+", " ", phrase).strip()
-    if not phrase or phrase in {"character", "enemy", "boss", "sprite"}:
-        return None
-    return _slug(phrase).replace("-", "_")
-
-
 def _records_for_plan(
     needs: list[dict[str, Any]],
     blueprint_fingerprint: str,
     external_parts: list[dict[str, Any]],
+    direction: dict[str, Any],
+    family_definitions: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, list[dict[str, Any]] | dict[str, Any]]:
-    style = _style_record(blueprint_fingerprint)
+    style = _style_record(blueprint_fingerprint, direction)
     core_parts = _part_records(style)
     parts = sorted(
         [*core_parts, *external_parts],
@@ -738,6 +977,7 @@ def _records_for_plan(
         ),
     )
     specs: list[dict[str, Any]] = []
+    briefs: list[dict[str, Any]] = []
     recipes: list[dict[str, Any]] = []
     animations: list[dict[str, Any]] = []
     tiles: list[dict[str, Any]] = []
@@ -747,32 +987,115 @@ def _records_for_plan(
     animation_index = tile_index = particle_index = sound_index = 0
     for index, need in enumerate(needs, 1):
         asset_id = f"ASP-{index:04d}"
+        brief_id = f"ABR-{index:04d}"
         recipe_id = f"RCP-{index:04d}"
         kind = str(need["kind"])
-        variants = 3 if kind in {"sound", "music"} else 1
+        request = dict(need["request"])
+        request_specification = dict(request["specification"])
+        variants = (
+            int(request_specification.get("variants", 1))
+            if kind in {"sound", "ambience", "music"}
+            else 1
+        )
         outputs = _output_paths(kind, str(need["purpose"]), index, variants)
-        body_family = _body_family_for_need(need)
+        actual_formats = {Path(path).suffix.lower().lstrip(".") for path in outputs}
+        declared_formats = set(map(str, request["output_contract"]["runtime_formats"]))
+        if actual_formats != declared_formats:
+            raise WorkflowError(
+                f"{request['id']}: output formats {sorted(declared_formats)} do not match supported {kind} outputs {sorted(actual_formats)}"
+            )
+        body_family = str(request_specification.get("body_family") or "")
+        subject_kind = str(request_specification.get("subject_kind") or "")
+        if kind in {"sprite", "animation"} and subject_kind == "actor":
+            family_definition = (family_definitions or BODY_FAMILY_DEFINITIONS).get(body_family)
+            if not family_definition:
+                raise WorkflowError(
+                    f"{request['id']}: unsupported body family {body_family!r}; provide an approved compatible source pack"
+                )
+            requested_tags = {
+                str(tag)
+                for field in (
+                    "body_tags",
+                    "surface_tags",
+                    "silhouette_tags",
+                    "equipment_tags",
+                )
+                for tag in request_specification.get(field, [])
+            }
+            disallowed_tags = sorted(
+                requested_tags - set(map(str, family_definition["allowed_tags"]))
+            )
+            if disallowed_tags:
+                raise WorkflowError(
+                    f"{request['id']}: body family {body_family} does not allow tags {disallowed_tags}"
+                )
+            available_tags = {
+                str(tag)
+                for part in parts
+                if body_family in part.get("compatible_body_families", [])
+                for tag in part.get("tags", [])
+            }
+            unsupported_tags = sorted(requested_tags - available_tags)
+            if unsupported_tags:
+                raise WorkflowError(
+                    f"{request['id']}: no compatible {body_family} parts provide tags {unsupported_tags}"
+                )
+        else:
+            family_definition = None
+            requested_tags = set()
         compatible_parts = [
             record
             for record in parts
             if body_family in record.get("compatible_body_families", [])
+            and (
+                bool(record.get("required_for_family"))
+                or bool(requested_tags & set(map(str, record.get("tags", []))))
+            )
         ]
+        if family_definition:
+            selected_slots = {str(part.get("slot")) for part in compatible_parts}
+            missing_slots = set(map(str, family_definition["required_slots"])) - selected_slots
+            forbidden_slots = set(map(str, family_definition["forbidden_slots"])) & selected_slots
+            if missing_slots or forbidden_slots:
+                raise WorkflowError(
+                    f"{request['id']}: incompatible {body_family} part contract; "
+                    f"missing slots {sorted(missing_slots)}, forbidden slots {sorted(forbidden_slots)}"
+                )
+            for part in compatible_parts:
+                direction_occupancy = part.get("direction_occupancy")
+                if (
+                    not isinstance(direction_occupancy, dict)
+                    or set(direction_occupancy) != set(DIRECTIONS)
+                    or any(not direction_occupancy[direction] for direction in DIRECTIONS)
+                    or part.get("occupancy_signature")
+                    != family_definition["occupancy_signature"]
+                ):
+                    raise WorkflowError(
+                        f"{request['id']}: source part {part['id']} does not satisfy the {body_family} four-direction occupancy signature"
+                    )
         source_part_ids = (
             [record["id"] for record in compatible_parts]
-            if kind in {"sprite", "animation"}
+            if kind in {"sprite", "animation"} and subject_kind == "actor"
             else []
         )
+        frame_dimensions = list(request_specification.get("dimensions", style["frame_size"]))
         parameters: dict[str, Any] = {
             "grid_size": 16,
+            "frame_dimensions": frame_dimensions,
             "palette_id": style["id"],
             "palette": style["palette"],
             "style_fingerprint": _style_generation_fingerprint(style),
             "body_family": body_family,
+            "subject_kind": subject_kind,
+            "subtype": request["subtype"],
             "required_directions": DIRECTIONS,
             "purpose": need["purpose"],
+            "request_id": request["id"],
+            "request_fingerprint": request["input_fingerprint"],
+            "media_direction_fingerprint": direction["input_fingerprint"],
             "output_license": "CC0-1.0",
         }
-        if kind in {"sprite", "animation"}:
+        if kind in {"sprite", "animation"} and subject_kind == "actor":
             layer_choices = {
                 slot: [part["id"] for part in compatible_parts if part.get("slot") == slot]
                 for slot in LAYER_SLOTS
@@ -793,25 +1116,18 @@ def _records_for_plan(
         if kind == "animation":
             animation_index += 1
             animation_id = f"ANI-{animation_index:04d}"
-            extra_state = _extra_animation_clip(need)
-            clips = [dict(clip) for clip in BASELINE_CLIPS]
-            if extra_state and extra_state not in {clip["name"] for clip in clips}:
-                clips.append(
-                    {
-                        "name": extra_state,
-                        "frames": 6,
-                        "fps": 12.0,
-                        "loop": False,
-                        "events": [{"frame": 3, "event": extra_state}],
-                    }
-                )
+            clips = [dict(clip) for clip in request_specification["clips"]]
             animation = _record(
                 {
                     "asset_spec_id": asset_id,
+                    "brief_id": brief_id,
                     "body_family": body_family,
                     "directions": DIRECTIONS,
                     "clips": clips,
-                    "anchors": ["origin", "feet", "head", "main_hand", "off_hand", "muzzle", "effect"],
+                    "anchors": NEUTRAL_ANCHORS,
+                    "root_motion": request_specification["root_motion"],
+                    "interruptibility": request_specification["interruptibility"],
+                    "mechanic_state_bindings": request_specification["mechanic_state_bindings"],
                 },
                 record_id=animation_id,
                 status="planned",
@@ -825,8 +1141,15 @@ def _records_for_plan(
             tile_record = _record(
                 {
                     "asset_spec_id": asset_id,
-                    "biome": str(need["purpose"]),
-                    "grid_size": 16,
+                    "brief_id": brief_id,
+                    "biome": str(request_specification["biome"]),
+                    "grid_size": int(frame_dimensions[0]),
+                    "tile_size": frame_dimensions,
+                    "terrain_roles": request_specification["terrain_roles"],
+                    "materials": request_specification["materials"],
+                    "transitions": request_specification["transitions"],
+                    "hazards": request_specification["hazards"],
+                    "variations": request_specification["variations"],
                     "tiles": [
                         {"id": f"terrain-{mask:03d}", "role": "terrain", "weight": 1.0, "collision": mask != 255, "navigation": mask == 255}
                         for mask in range(256)
@@ -834,6 +1157,7 @@ def _records_for_plan(
                     "adjacency": {"encoding": "8-neighbor-bitmask", "opposite_edges_must_match": True},
                     "required_neighbor_masks": list(range(256)),
                     "stage_constraints": {
+                        **request_specification["stage_constraints"],
                         "entrance_exit_connected": True,
                         "required_encounters": [],
                         "safe_spawn_radius": 2,
@@ -853,16 +1177,21 @@ def _records_for_plan(
             particle = _record(
                 {
                     "asset_spec_id": asset_id,
+                    "brief_id": brief_id,
                     "name": str(need["purpose"]),
                     "texture": outputs[0],
                     "seed": index * 1009,
-                    "amount": 24,
-                    "lifetime": 0.6,
+                    "amount": min(32, int(request_specification["budgets"].get("max_particles", 24))),
+                    "lifetime": max(request_specification["event_timing"].values()) or 0.6,
                     "fixed_fps": 12,
                     "motion": {"direction_degrees": -90, "spread_degrees": 55, "velocity": [24, 52], "gravity": [0, 20]},
                     "colors": ["#f7c95cff", "#e66b3dff", "#d94b64ff", "#00000000"],
                     "cpu_fallback": True,
-                    "budget": {"max_particles": 32, "max_overdraw_cells": 4},
+                    "ownership": request_specification["ownership"],
+                    "phases": request_specification["phases"],
+                    "event_timing": request_specification["event_timing"],
+                    "shape_cues": request_specification["shape_cues"],
+                    "budget": request_specification["budgets"],
                 },
                 record_id=particle_id,
                 status="planned",
@@ -876,6 +1205,7 @@ def _records_for_plan(
             sound = _record(
                 {
                     "asset_spec_id": asset_id,
+                    "brief_id": brief_id,
                     "name": str(need["purpose"]),
                     "category": category,
                     "event": str(need["source_ref"]),
@@ -883,20 +1213,28 @@ def _records_for_plan(
                         {"waveform": "square" if category == "sfx" else "triangle", "frequency": 220.0, "volume": 0.65},
                         {"waveform": "noise" if category == "sfx" else "sine", "frequency": 110.0, "volume": 0.25},
                     ],
-                    "duration_seconds": 0.18 if category == "sfx" else (8.0 if category == "music" else 4.0),
+                    "event_tags": request_specification["event_tags"],
+                    "material_tags": request_specification["material_tags"],
+                    "duration_seconds": float(request_specification["duration_seconds"]),
                     "sample_rate": 48000,
                     "channels": 1 if category == "sfx" else 2,
-                    "variants": variants,
+                    "variants": int(request_specification["variants"]),
                     "peak_dbfs": -1.0,
-                    "loop": category in {"ambience", "music"},
-                    "bpm": 120 if category == "music" else None,
-                    "key": "A minor" if category == "music" else None,
+                    "loop": bool(request_specification["loop"]),
+                    "bpm": request_specification.get("tempo"),
+                    "meter": request_specification.get("meter"),
+                    "key": request_specification.get("key"),
                     "bars": 4 if category == "music" else None,
-                    "stems": ["explore", "combat", "boss"] if category == "music" else [],
-                    "transition_points": [0, 2, 4, 6, 8] if category == "music" else [],
+                    "stems": request_specification.get("stems", []),
+                    "transition_points": request_specification.get("transitions", []),
+                    "loudness_lufs": request_specification.get("loudness_lufs"),
+                    "synchronization": request_specification["synchronization"],
+                    "spatial_behavior": request_specification["spatial_behavior"],
+                    "priority": request_specification["priority"],
+                    "concurrency": request_specification["concurrency"],
                     "accessibility_alternative": "A synchronized visual state indicator communicates the same event.",
                     "mutation": {"pitch_semitones": [-0.4, 0.4], "volume_db": [-1.0, 0.0]},
-                    "adsr": {"attack": 0.005, "decay": 0.03, "sustain": 0.82, "release": 0.02},
+                    "adsr": request_specification["envelope"],
                     "pitch_envelope": {"start_semitones": 2.0 if category == "sfx" else 0.0, "end_semitones": 0.0},
                     "arpeggio": {"semitones": [0, 7, 12, 7], "step_seconds": 0.25},
                     "filter": {"type": "lowpass", "window_samples": 3},
@@ -912,11 +1250,48 @@ def _records_for_plan(
             sounds.append(sound)
             parameters["sound_spec_id"] = sound_id
             parameters["sound"] = sound
+        brief = {
+            "schema_version": "2.0",
+            "id": brief_id,
+            "family": kind,
+            "subtype": request["subtype"],
+            "purpose": request["purpose"],
+            "project_context": {
+                "media_direction_id": direction["id"],
+                "media_direction_fingerprint": direction["input_fingerprint"],
+            },
+            "request_id": request["id"],
+            "request_fingerprint": request["input_fingerprint"],
+            "source_refs": list(need["source_refs"]),
+            "dependencies": request["dependencies"],
+            "references": request["references"],
+            "control": request["control"],
+            "specification": request_specification,
+            "output_contract": {
+                **request["output_contract"],
+                "runtime_paths": outputs,
+            },
+            "accessibility": request["accessibility"],
+            "acceptance_criteria": request["acceptance_criteria"],
+            "license_allowlist": [
+                "original",
+                "CC0-1.0",
+                "CC-BY-4.0",
+                "Apache-2.0",
+                "proprietary",
+                "commercial",
+            ],
+        }
+        brief["input_fingerprint"] = fingerprint(brief)
+        _assert_schema(brief, "asset-brief.schema.json")
+        briefs.append(brief)
         recipe = _record(
             {
                 "kind": kind,
                 "asset_spec_id": asset_id,
-                "seed": index * 7919,
+                "brief_id": brief_id,
+                "brief_fingerprint": brief["input_fingerprint"],
+                "seed": int(request["control"]["seed"]),
                 "source_part_ids": source_part_ids,
                 "parameters": parameters,
                 "outputs": outputs,
@@ -931,27 +1306,32 @@ def _records_for_plan(
             _record(
                 {
                     "kind": kind,
+                    "brief_id": brief_id,
+                    "brief_fingerprint": brief["input_fingerprint"],
+                    "request_id": request["id"],
                     "purpose": need["purpose"],
-                    "source_refs": [need["source_ref"]],
+                    "source_refs": list(need["source_refs"]),
                     "runtime_paths": outputs,
                     "recipe_ids": [recipe_id],
                     "required": bool(need["required"]),
-                    "acceptance_criteria": [
-                        "Output is deterministic for the pinned recipe, source pack, and seed.",
-                        "Godot loads the generated runtime resource without import errors.",
-                        "License, provenance, checksum, feedback, and accessibility coverage validate.",
-                    ],
+                    "acceptance_criteria": request["acceptance_criteria"],
                 },
                 record_id=asset_id,
                 status="planned",
             )
         )
-        coverage.append({"source_ref": need["source_ref"], "asset_spec_ids": [asset_id]})
+        coverage.extend(
+            {"source_ref": source_ref, "request_id": request["id"], "asset_spec_ids": [asset_id]}
+            for source_ref in need["source_refs"]
+        )
     plan = _record(
         {
             "blueprint_fingerprint": blueprint_fingerprint,
             "style_pack_id": style["id"],
             "asset_spec_ids": [record["id"] for record in specs],
+            "brief_ids": [record["id"] for record in briefs],
+            "media_direction_id": direction["id"],
+            "media_direction_fingerprint": direction["input_fingerprint"],
             "coverage": coverage,
             "generation_profile": "pixel-media-v1",
         },
@@ -961,13 +1341,14 @@ def _records_for_plan(
     pack_material = {
         "schema_version": SCHEMA_VERSION,
         "id": "core-topdown-v1",
-        "name": "Core Top-down 16x16",
+        "name": "Core Top-down Pixel Parts (16-128 px outputs)",
+        "pack_revision": 2,
         "license": "CC0-1.0",
         "grid_size": 16,
         "perspective": "top_down",
         "directions": DIRECTIONS,
         "layer_slots": LAYER_SLOTS,
-        "body_families": ["humanoid", "compact_enemy"],
+        "body_families": BODY_FAMILY_DEFINITIONS,
         "part_ids": [part["id"] for part in core_parts],
         "part_hashes": {part["id"]: part["input_fingerprint"] for part in core_parts},
         "provenance": "Original procedural pixel coordinates; no LPC or third-party artwork is bundled.",
@@ -976,6 +1357,7 @@ def _records_for_plan(
     return {
         "plan": plan,
         "styles": [style],
+        "briefs": briefs,
         "parts": parts,
         "core_parts": core_parts,
         "specs": specs,
@@ -993,6 +1375,7 @@ def _record_destinations(project: Path, records: dict[str, Any]) -> list[tuple[P
         (project / "work" / "assets" / "APL-0001.json", records["plan"]),
     ]
     mapping = {
+        "briefs": "briefs",
         "styles": "styles",
         "parts": "parts",
         "specs": "specs",
@@ -1018,6 +1401,7 @@ def _reconcile_planned_records(
     }
     desired_paths = {path.resolve() for path, _ in destinations}
     managed = {
+        "briefs": "ABR-*.json",
         "styles": "STY-*.json",
         "parts": "PRT-*.json",
         "specs": "ASP-*.json",
@@ -1102,12 +1486,55 @@ def _render_asset_docs(project: Path, records: dict[str, Any]) -> None:
 def plan_assets(root: Path | str, *, apply: bool = False) -> dict[str, Any]:
     project = _project(root)
     needs, blueprint_fingerprint = _collect_needs(project)
-    builtin_ids = {part["id"] for part in _part_records(_style_record(blueprint_fingerprint))}
-    external_parts = _external_part_records(project, builtin_ids)
-    records = _records_for_plan(needs, blueprint_fingerprint, external_parts)
+    direction, requests, blocked = _structured_media_contract(project, needs)
+    if blocked:
+        return blocked
+    assert direction is not None
+    planned_requests = _planning_requests(needs, requests)
+    builtin_ids = {
+        part["id"]
+        for part in _part_records(_style_record(blueprint_fingerprint, direction))
+    }
+    try:
+        external_parts = _external_part_records(project, builtin_ids)
+        family_definitions = {
+            **BODY_FAMILY_DEFINITIONS,
+            **_external_body_family_definitions(project),
+        }
+    except (WorkflowError, ValueError, TypeError, KeyError, AttributeError) as error:
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "status": "blocked",
+            "operation": "plan",
+            "restart_stage": "asset_specification",
+            "missing_request_ids": [],
+            "missing_fields": [],
+            "errors": [f"External source part or family contract is invalid: {error}"],
+        }
+    try:
+        records = _records_for_plan(
+            planned_requests,
+            blueprint_fingerprint,
+            external_parts,
+            direction,
+            family_definitions,
+        )
+    except (WorkflowError, ValueError, TypeError, KeyError, AttributeError) as error:
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "status": "blocked",
+            "operation": "plan",
+            "restart_stage": "asset_specification",
+            "missing_request_ids": [],
+            "missing_fields": [],
+            "errors": [str(error)],
+        }
     for _, record in _record_destinations(project, records):
         prefix = str(record["id"]).split("-")[0]
-        _assert_schema(record, SCHEMA_BY_PREFIX[prefix])
+        _assert_schema(
+            record,
+            "asset-brief.schema.json" if prefix == "ABR" else SCHEMA_BY_PREFIX[prefix],
+        )
     destinations = _record_destinations(project, records)
     result = {
         "schema_version": SCHEMA_VERSION,
@@ -1116,6 +1543,7 @@ def plan_assets(root: Path | str, *, apply: bool = False) -> dict[str, Any]:
         "blueprint_fingerprint": blueprint_fingerprint,
         "counts": {
             "asset_specs": len(records["specs"]),
+            "briefs": len(records["briefs"]),
             "recipes": len(records["recipes"]),
             "parts": len(records["parts"]),
             "animations": len(records["animations"]),
@@ -1136,15 +1564,16 @@ def plan_assets(root: Path | str, *, apply: bool = False) -> dict[str, Any]:
         project / "assets" / "source" / "packs" / "core-topdown-v1" / "pack.json",
         records["pack"],
     )
+    core_parts_folder = (
+        project / "assets" / "source" / "packs" / "core-topdown-v1" / "parts"
+    )
+    desired_core_part_ids = {str(part["id"]) for part in records["core_parts"]}
+    for path in core_parts_folder.glob("PRT-*.json"):
+        if path.stem not in desired_core_part_ids:
+            path.unlink()
     for part in records["core_parts"]:
         _write_json(
-            project
-            / "assets"
-            / "source"
-            / "packs"
-            / "core-topdown-v1"
-            / "parts"
-            / f"{part['id']}.json",
+            core_parts_folder / f"{part['id']}.json",
             part,
         )
     _render_asset_docs(project, records)
@@ -1178,9 +1607,27 @@ def _approval_request(project: Path, style: dict[str, Any], sample_hashes: list[
         check=False,
     )
     commit_sha = result.stdout.strip() if result.returncode == 0 and re.fullmatch(r"[0-9a-f]{40}", result.stdout.strip()) else "UNCOMMITTED"
+    representative_ids = _representative_spec_ids(project)
+    specs = {
+        str(spec["id"]): spec for spec in _all_records(project, "specs", "ASP")
+    }
+    briefs = {
+        str(brief["id"]): brief for brief in _all_records(project, "briefs", "ABR")
+    }
+    brief_fingerprints = {
+        str(specs[spec_id].get("brief_id")): briefs.get(
+            str(specs[spec_id].get("brief_id")), {}
+        ).get("input_fingerprint")
+        for spec_id in representative_ids
+        if spec_id in specs
+    }
     return {
         "scope_hash": fingerprint(
-            {"style": _style_generation_material(style), "samples": sample_hashes}
+            {
+                "style": _style_generation_material(style),
+                "brief_fingerprints": brief_fingerprints,
+                "samples": sample_hashes,
+            }
         ),
         "commit_sha": commit_sha,
         "decision": "Approve the representative pixel-art and procedural-audio style for bulk generation.",
@@ -1193,21 +1640,22 @@ def _save_approval(project: Path, approval: dict[str, Any]) -> None:
 
 def _representative_spec_ids(project: Path) -> list[str]:
     specs = _all_records(project, "specs", "ASP")
-    selected: list[str] = []
-    targets = ["character", "enemy", "tileset", "particle", "ui", "sound", "music"]
-    for target in targets:
-        candidate = next(
-            (
-                spec
-                for spec in specs
-                if spec["id"] not in selected
-                and (target == spec["kind"] or target in str(spec["purpose"]).lower())
-            ),
-            None,
+    briefs = {
+        str(brief["id"]): brief for brief in _all_records(project, "briefs", "ABR")
+    }
+    selected_by_contract: dict[tuple[str, ...], str] = {}
+    for spec in sorted(specs, key=lambda value: str(value["id"])):
+        brief = briefs.get(str(spec.get("brief_id")), {})
+        family = str(brief.get("family", spec.get("kind", "")))
+        subtype = str(brief.get("subtype", ""))
+        body_family = str(brief.get("specification", {}).get("body_family", ""))
+        key = (
+            (family, subtype, body_family)
+            if family in {"sprite", "animation"} and body_family
+            else (family, subtype)
         )
-        if candidate:
-            selected.append(str(candidate["id"]))
-    return selected
+        selected_by_contract.setdefault(key, str(spec["id"]))
+    return [selected_by_contract[key] for key in sorted(selected_by_contract)]
 
 
 def _verify_human_approval(
@@ -1292,6 +1740,14 @@ def next_asset_task(root: Path | str) -> dict[str, Any]:
     project = _project(root)
     state = _state(project)
     status = str(state.get("status"))
+    try:
+        needs, _ = _collect_needs(project)
+    except WorkflowError:
+        needs = []
+    if needs:
+        _, _, blocked = _structured_media_contract(project, needs)
+        if blocked:
+            return {**blocked, "media_state": status}
     operation = {
         "unplanned": "plan",
         "inventoried": "sample",
@@ -1351,12 +1807,15 @@ def _palette_values(style: dict[str, Any]) -> tuple[list[int], dict[str, int]]:
 
 def _visual_dimensions(recipe: dict[str, Any]) -> tuple[int, int, list[dict[str, Any]]]:
     kind = recipe["kind"]
-    clips = list(recipe.get("parameters", {}).get("clips", []))
+    parameters = recipe.get("parameters", {})
+    clips = list(parameters.get("clips", []))
+    dimensions = parameters.get("frame_dimensions", [16, 16])
+    frame_width, frame_height = int(dimensions[0]), int(dimensions[1])
     if kind == "animation":
-        return 16 * sum(int(clip["frames"]) for clip in clips), 16 * 4, clips
+        return frame_width * sum(int(clip["frames"]) for clip in clips), frame_height * 4, clips
     if kind == "tileset":
-        return 16 * 16, 16 * 16, clips
-    return 16, 16, clips
+        return frame_width * 16, frame_height * 16, clips
+    return frame_width, frame_height, clips
 
 
 def _indexed_png(
@@ -1366,7 +1825,13 @@ def _indexed_png(
     parts: list[dict[str, Any]] | None = None,
 ) -> bytes:
     Image, ImageDraw = _pillow()
-    width, height, clips = _visual_dimensions(recipe)
+    target_width, target_height, clips = _visual_dimensions(recipe)
+    if recipe["kind"] == "animation":
+        width, height = 16 * sum(int(clip["frames"]) for clip in clips), 16 * 4
+    elif recipe["kind"] == "tileset":
+        width, height = 16 * 16, 16 * 16
+    else:
+        width, height = 16, 16
     image = Image.new("P", (width, height), color=0)
     palette, colors = _palette_values(style)
     image.putpalette(palette)
@@ -1467,11 +1932,40 @@ def _indexed_png(
             x, y = rng.randrange(2, 14), rng.randrange(2, 14)
             draw.point((x, y), fill=rng.choice([colors["primary"], colors["secondary"], colors["danger"]]))
     elif recipe["kind"] == "ui":
-        draw.rounded_rectangle((1, 1, 14, 14), radius=2, fill=colors["dark"], outline=colors["light"])
-        draw.rectangle((5, 4, 10, 11), fill=colors["primary"])
-        draw.point((8, 7), fill=colors["secondary"])
+        subtype = str(recipe.get("parameters", {}).get("subtype", ""))
+        if subtype == "icon":
+            draw.rectangle((3, 3, 12, 12), fill=colors["dark"], outline=colors["light"])
+            draw.rectangle((6, 5, 9, 10), fill=colors["primary"])
+        elif subtype == "cursor":
+            draw.polygon([(2, 2), (2, 13), (6, 10), (9, 14), (11, 13), (8, 9), (13, 8)], fill=colors["light"], outline=colors["outline"])
+        elif subtype == "marker":
+            draw.polygon([(8, 1), (14, 7), (8, 14), (2, 7)], fill=colors["primary"], outline=colors["light"])
+            draw.rectangle((7, 5, 8, 9), fill=colors["secondary"])
+        elif subtype == "frame":
+            draw.rectangle((1, 1, 14, 14), outline=colors["light"], width=2)
+            draw.rectangle((3, 3, 12, 12), outline=colors["dark"])
+        elif subtype == "nine_slice":
+            draw.rectangle((1, 1, 14, 14), fill=colors["dark"], outline=colors["light"])
+            for x, y in ((2, 2), (12, 2), (2, 12), (12, 12)):
+                draw.rectangle((x, y, x + 1, y + 1), fill=colors["secondary"])
+            draw.line((4, 2, 11, 2), fill=colors["mid"])
+            draw.line((4, 13, 11, 13), fill=colors["mid"])
+        elif subtype == "panel":
+            draw.rounded_rectangle((1, 1, 14, 14), radius=2, fill=colors["dark"], outline=colors["light"])
+            draw.rectangle((5, 4, 10, 11), fill=colors["primary"])
+            draw.point((8, 7), fill=colors["secondary"])
+        else:
+            raise WorkflowError(f"{recipe['id']}: unsupported UI subtype {subtype!r}")
+    elif recipe.get("parameters", {}).get("subject_kind") == "style_sample":
+        swatches = ["outline", "shadow", "dark", "mid", "light", "primary", "secondary", "danger", "safe"]
+        for swatch_index, semantic in enumerate(swatches):
+            x = 1 + (swatch_index % 3) * 5
+            y = 1 + (swatch_index // 3) * 5
+            draw.rectangle((x, y, x + 3, y + 3), fill=colors[semantic])
     else:
         cell(0, 0, 0, 0)
+    if image.size != (target_width, target_height):
+        image = image.resize((target_width, target_height), resample=Image.Resampling.NEAREST)
     payload = io.BytesIO()
     image.save(payload, format="PNG", optimize=False, compress_level=9)
     return payload.getvalue()
@@ -1479,6 +1973,9 @@ def _indexed_png(
 
 def _sprite_frames_resource(png_path: str, recipe: dict[str, Any]) -> bytes:
     clips = recipe["parameters"].get("clips", BASELINE_CLIPS)
+    frame_width, frame_height = map(
+        int, recipe["parameters"].get("frame_dimensions", [16, 16])
+    )
     lines = [
         f'[gd_resource type="SpriteFrames" load_steps={2 + sum(int(c["frames"]) for c in clips) * 4} format=3]',
         "",
@@ -1495,13 +1992,13 @@ def _sprite_frames_resource(png_path: str, recipe: dict[str, Any]) -> bytes:
             for local_frame in range(int(clip["frames"])):
                 global_frame = direction_index * total_frames + clip_offset + local_frame
                 sub_id = f"AtlasTexture_{global_frame:04d}"
-                x = (clip_offset + local_frame) * 16
-                y = direction_index * 16
+                x = (clip_offset + local_frame) * frame_width
+                y = direction_index * frame_height
                 subresources.extend(
                     [
                         f'[sub_resource type="AtlasTexture" id="{sub_id}"]',
                         'atlas = ExtResource("1_texture")',
-                        f"region = Rect2({x}, {y}, 16, 16)",
+                        f"region = Rect2({x}, {y}, {frame_width}, {frame_height})",
                         "",
                     ]
                 )
@@ -1515,7 +2012,10 @@ def _sprite_frames_resource(png_path: str, recipe: dict[str, Any]) -> bytes:
     return "\n".join(lines).encode("utf-8")
 
 
-def _tileset_resource(png_path: str) -> bytes:
+def _tileset_resource(png_path: str, recipe: dict[str, Any]) -> bytes:
+    tile_width, tile_height = map(
+        int, recipe["parameters"].get("frame_dimensions", [16, 16])
+    )
     lines = [
         '[gd_resource type="TileSet" load_steps=3 format=3]',
         "",
@@ -1523,11 +2023,11 @@ def _tileset_resource(png_path: str) -> bytes:
         "",
         '[sub_resource type="TileSetAtlasSource" id="TileSetAtlasSource_media"]',
         'texture = ExtResource("1_texture")',
-        "texture_region_size = Vector2i(16, 16)",
+        f"texture_region_size = Vector2i({tile_width}, {tile_height})",
     ]
     for mask in range(256):
         lines.append(f"{mask % 16}:{mask // 16}/0 = 0")
-    lines.extend(["", "[resource]", "tile_size = Vector2i(16, 16)", 'sources/0 = SubResource("TileSetAtlasSource_media")', ""])
+    lines.extend(["", "[resource]", f"tile_size = Vector2i({tile_width}, {tile_height})", 'sources/0 = SubResource("TileSetAtlasSource_media")', ""])
     return "\n".join(lines).encode("utf-8")
 
 
@@ -1757,7 +2257,17 @@ def _recipe_inputs(
                 raise WorkflowError(
                     f"{recipe['id']}: source part {part_id} is incompatible with required animations"
                 )
-            anchors = part.get("anchors", {})
+            raw_anchors = part.get("anchors", {})
+            anchors = {
+                LEGACY_ANCHOR_MAP.get(str(name), str(name)): point
+                for name, point in raw_anchors.items()
+            }
+            if "center" not in anchors and "origin" in anchors:
+                anchors["center"] = anchors["origin"]
+            if set(anchors) != set(NEUTRAL_ANCHORS):
+                raise WorkflowError(
+                    f"{recipe['id']}: source part {part_id} has invalid anchors"
+                )
             if anchor_reference is None:
                 anchor_reference = dict(anchors)
             elif anchors != anchor_reference:
@@ -1843,7 +2353,7 @@ def _compile_recipe(
         if kind == "animation":
             compiled[next(path for path in outputs if path.endswith(".tres"))] = _sprite_frames_resource(png_path, recipe)
         elif kind == "tileset":
-            compiled[next(path for path in outputs if path.endswith(".tres"))] = _tileset_resource(png_path)
+            compiled[next(path for path in outputs if path.endswith(".tres"))] = _tileset_resource(png_path, recipe)
         elif kind == "particle":
             gpu = next(path for path in outputs if path.endswith(".tscn") and not path.endswith("-cpu.tscn"))
             cpu = next(path for path in outputs if path.endswith("-cpu.tscn"))
@@ -1880,6 +2390,8 @@ def _cached_recipe_result(
     if (
         value.get("recipe_id") != recipe.get("id")
         or value.get("recipe_fingerprint") != recipe.get("input_fingerprint")
+        or value.get("brief_id") != recipe.get("brief_id")
+        or value.get("brief_fingerprint") != recipe.get("brief_fingerprint")
         or not isinstance(hashes, dict)
         or set(map(str, hashes)) != set(map(str, recipe.get("outputs", [])))
     ):
@@ -1923,12 +2435,17 @@ def _manifest_record(asset_id: str, recipe: dict[str, Any], path: str, digest: s
                 "prompt_sha256": fingerprint(recipe["parameters"].get("purpose", "")),
                 "recipe_id": recipe["id"],
                 "recipe_sha256": recipe["input_fingerprint"],
+                "brief_id": recipe.get("brief_id"),
+                "brief_sha256": recipe.get("brief_fingerprint"),
+                "request_id": recipe.get("parameters", {}).get("request_id"),
+                "request_sha256": recipe.get("parameters", {}).get("request_fingerprint"),
                 "seed": recipe["seed"],
                 "source_part_ids": recipe["source_part_ids"],
                 "source_part_licenses": recipe.get("parameters", {}).get("source_part_licenses", {}),
             },
             "sha256": digest,
             "asset_spec_id": recipe["asset_spec_id"],
+            "brief_id": recipe.get("brief_id"),
         },
         record_id=asset_id,
         status="generated",
@@ -2029,6 +2546,8 @@ def _generate_selected(
                     "schema_version": SCHEMA_VERSION,
                     "recipe_id": recipe["id"],
                     "recipe_fingerprint": recipe["input_fingerprint"],
+                    "brief_id": recipe["brief_id"],
+                    "brief_fingerprint": recipe["brief_fingerprint"],
                     "outputs": result["hashes"],
                 },
             )
@@ -2140,6 +2659,7 @@ def validate_assets(root: Path | str) -> dict[str, Any]:
     records: dict[str, dict[str, Any]] = {}
     for folder, prefix in (
         ("", "APL"),
+        ("briefs", "ABR"),
         ("styles", "STY"),
         ("parts", "PRT"),
         ("specs", "ASP"),
@@ -2160,7 +2680,8 @@ def validate_assets(root: Path | str) -> dict[str, Any]:
             if record_id in records:
                 errors.append(f"Duplicate media id: {record_id}")
             records[record_id] = record
-            errors.extend(f"{record_id}: {message}" for message in _schema_errors(record, SCHEMA_BY_PREFIX[prefix]))
+            schema_name = "asset-brief.schema.json" if prefix == "ABR" else SCHEMA_BY_PREFIX[prefix]
+            errors.extend(f"{record_id}: {message}" for message in _schema_errors(record, schema_name))
             if not _validate_fingerprint(record):
                 errors.append(f"{record_id}: input fingerprint does not match current record content")
     if not records:
@@ -2191,6 +2712,7 @@ def validate_assets(root: Path | str) -> dict[str, Any]:
                 errors.append(f"Core source pack file is missing or stale for {part_id}")
     plan = records.get("APL-0001", {})
     spec_ids = set(plan.get("asset_spec_ids", []))
+    brief_ids = set(plan.get("brief_ids", []))
     coverage_sources: set[str] = set()
     for row in plan.get("coverage", []):
         source = str(row.get("source_ref", ""))
@@ -2212,6 +2734,11 @@ def validate_assets(root: Path | str) -> dict[str, Any]:
             errors.append(f"APL-0001: stale blueprint media source {stale}")
         if plan.get("blueprint_fingerprint") != current_blueprint_fingerprint:
             errors.append("APL-0001: blueprint fingerprint changed; replan assets")
+        direction, requests, blocked = _structured_media_contract(project, expected)
+        if blocked:
+            errors.extend(blocked["errors"])
+        elif direction and plan.get("media_direction_fingerprint") != direction.get("input_fingerprint"):
+            errors.append("APL-0001: media direction changed; replan assets")
     recipe_ids = {record_id for record_id in records if record_id.startswith("RCP-")}
     current_style = records.get(str(plan.get("style_pack_id", "STY-0001")))
     current_style_fingerprint = (
@@ -2225,6 +2752,12 @@ def validate_assets(root: Path | str) -> dict[str, Any]:
         if not spec:
             errors.append(f"APL-0001: missing asset specification {asset_id}")
             continue
+        brief_id = str(spec.get("brief_id", ""))
+        brief = records.get(brief_id)
+        if brief_id not in brief_ids or not brief:
+            errors.append(f"{asset_id}: missing derived asset brief {brief_id}")
+        elif spec.get("brief_fingerprint") != brief.get("input_fingerprint"):
+            errors.append(f"{asset_id}: asset brief changed; replan assets")
         for recipe_id in spec.get("recipe_ids", []):
             if recipe_id not in recipe_ids:
                 errors.append(f"{asset_id}: dangling media recipe {recipe_id}")
@@ -2242,6 +2775,12 @@ def validate_assets(root: Path | str) -> dict[str, Any]:
             errors.append(f"{recipe_id}: pinned palette does not match the current style pack")
         if recipe.get("asset_spec_id") not in spec_ids:
             errors.append(f"{recipe_id}: dangling asset specification {recipe.get('asset_spec_id')}")
+        brief_id = str(recipe.get("brief_id", ""))
+        brief = records.get(brief_id)
+        if brief_id not in brief_ids or not brief:
+            errors.append(f"{recipe_id}: dangling asset brief {brief_id}")
+        elif recipe.get("brief_fingerprint") != brief.get("input_fingerprint"):
+            errors.append(f"{recipe_id}: asset brief changed; replan assets")
         for part_id in recipe.get("source_part_ids", []):
             if part_id not in records:
                 errors.append(f"{recipe_id}: dangling source part {part_id}")
@@ -2320,6 +2859,19 @@ def validate_assets(root: Path | str) -> dict[str, Any]:
             for field in ("provider", "provider_version", "model_id", "model_license", "prompt_sha256", "recipe_id", "seed")
         ):
             errors.append(f"{asset_id}: generated provenance is incomplete")
+        if provenance.get("provider") == "aigame-local-media":
+            brief_id = str(provenance.get("brief_id", ""))
+            brief = records.get(brief_id)
+            if not brief or provenance.get("brief_sha256") != brief.get("input_fingerprint"):
+                errors.append(f"{asset_id}: generated brief provenance is missing or stale")
+            request_id = str(provenance.get("request_id", ""))
+            request_path = project / "work" / "concept" / "media_requests" / f"{request_id}.json"
+            if (
+                not request_path.is_file()
+                or provenance.get("request_sha256")
+                != _load_json(request_path).get("input_fingerprint")
+            ):
+                errors.append(f"{asset_id}: generated request provenance is missing or stale")
         if artifact_path.is_file() and asset.get("sha256") != hashlib.sha256(artifact_path.read_bytes()).hexdigest():
             errors.append(f"{asset_id}: checksum mismatch for {runtime_path}")
     if len(by_path) != len(assets):
@@ -2347,8 +2899,14 @@ def validate_assets(root: Path | str) -> dict[str, Any]:
                     with Image.open(path) as image:
                         if image.mode != "P":
                             errors.append(f"{runtime_path}: pixel output is not indexed PNG")
-                        if image.width % 16 or image.height % 16:
-                            errors.append(f"{runtime_path}: dimensions are not on the 16x16 grid")
+                        recipe_id = str((record or {}).get("provenance", {}).get("recipe_id", ""))
+                        recipe = records.get(recipe_id, {})
+                        if recipe:
+                            expected_width, expected_height, _ = _visual_dimensions(recipe)
+                            if image.size != (expected_width, expected_height):
+                                errors.append(
+                                    f"{runtime_path}: dimensions {image.size} do not match the locked contract {(expected_width, expected_height)}"
+                                )
                 except OSError as error:
                     errors.append(f"{runtime_path}: invalid PNG: {error}")
             elif path.suffix.lower() == ".wav":
@@ -2382,6 +2940,7 @@ def validate_assets(root: Path | str) -> dict[str, Any]:
         "warnings": warnings,
         "counts": {
             "asset_specs": len(spec_ids),
+            "briefs": len(brief_ids),
             "recipes": len(recipe_ids),
             "manifest_assets": len(assets),
             "coverage": len(coverage_sources),

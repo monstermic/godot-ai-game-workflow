@@ -12,7 +12,7 @@
     "updated_at": {"type": "string", "format": "date-time"},
     "input_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "biome": {"type": "string", "minLength": 1},
-    "grid_size": {"const": 16},
+    "grid_size": {"type": "integer", "minimum": 16, "maximum": 128, "multipleOf": 16},
     "tiles": {"type": "array", "items": {"type": "object", "required": ["id", "role", "weight", "collision", "navigation"], "properties": {"id": {"type": "string"}, "role": {"type": "string"}, "weight": {"type": "number", "minimum": 0}, "collision": {"type": "boolean"}, "navigation": {"type": "boolean"}}}, "minItems": 1},
     "adjacency": {"type": "object"},
     "required_neighbor_masks": {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 255}, "uniqueItems": true},

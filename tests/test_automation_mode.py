@@ -20,6 +20,7 @@ from aigame.core import WorkflowError, choose_next, fingerprint
 from aigame.generator import create_game
 from aigame.validation import validate_project
 from tests.test_concept_blueprint import (
+    asset_specification_result,
     audit_result,
     catalog_result,
     game_arc_result,
@@ -178,7 +179,8 @@ class AutomationModeTests(unittest.TestCase):
         submit_concept_task(self.root, "CTK-0003", mechanic_result(), apply=True)
         submit_concept_task(self.root, "CTK-0004", catalog_result(), apply=True)
         submit_concept_task(self.root, "CTK-0005", game_arc_result(), apply=True)
-        finalized = submit_concept_task(self.root, "CTK-0006", audit_result(self.root), apply=True)
+        submit_concept_task(self.root, "CTK-0006", asset_specification_result(self.root), apply=True)
+        finalized = submit_concept_task(self.root, "CTK-0007", audit_result(self.root), apply=True)
         self.assertEqual(finalized["status"], "passed")
         self.assertEqual(next_concept_task(self.root)["status"], "finalized")
         self.assertIn(
@@ -217,7 +219,8 @@ class AutomationModeTests(unittest.TestCase):
         submit_concept_task(self.root, "CTK-0003", mechanic_result(), apply=True)
         submit_concept_task(self.root, "CTK-0004", catalog_result(), apply=True)
         submit_concept_task(self.root, "CTK-0005", game_arc_result(), apply=True)
-        pending = submit_concept_task(self.root, "CTK-0006", audit_result(self.root), apply=True)
+        submit_concept_task(self.root, "CTK-0006", asset_specification_result(self.root), apply=True)
+        pending = submit_concept_task(self.root, "CTK-0007", audit_result(self.root), apply=True)
         self.assertEqual(pending["status"], "blocked")
         self.assertEqual(pending["gate"], "commit_blueprint_inputs")
         subprocess.run(["git", "add", "-A"], cwd=self.root, check=True)

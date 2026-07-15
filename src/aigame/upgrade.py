@@ -7,7 +7,7 @@ from typing import Any
 
 from . import __version__
 from .automation import default_automation_policy
-from .core import fingerprint, workflow_snapshot_checksum
+from .core import WorkflowError, fingerprint, workflow_snapshot_checksum
 from .generator import runtime_composer_source
 
 
@@ -41,6 +41,44 @@ jobs:
       actor: ${{{{ github.actor }}}}
       comment-body: ${{{{ github.event.comment.body }}}}
 '''
+
+
+def _media_revision_remediation(project: Path) -> dict[str, Any]:
+    state_path = project / ".aigame" / "state" / "concept.json"
+    contract_errors: list[str] = []
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.is_file() else {}
+    except (OSError, json.JSONDecodeError) as error:
+        state = {}
+        contract_errors.append(f"Concept state cannot be read: {error}")
+    advanced_status = state.get("status") in {
+        "quality_audit",
+        "blueprint_approval",
+        "finalized",
+    }
+    if advanced_status:
+        try:
+            from .media import _collect_needs, _structured_media_contract
+
+            needs, _ = _collect_needs(project, require_finalized=False)
+            _, _, blocked = _structured_media_contract(project, needs)
+            if blocked:
+                contract_errors.extend(map(str, blocked.get("errors", [])))
+        except (WorkflowError, OSError, ValueError, TypeError, KeyError) as error:
+            contract_errors.append(str(error))
+    required = bool(contract_errors) and (advanced_status or not state)
+    return {
+        "required": required,
+        "restart_stage": "asset_specification",
+        "contract_errors": sorted(set(contract_errors)),
+        "change_file": "work/concept/media-v2-revision.json",
+        "change_file_payload": {
+            "summary": "Add approved structured media direction and exhaustive requests for workflow 1.4.0.",
+            "restart_stage": "asset_specification",
+            "identity_change": False,
+        },
+        "command": "aigame concept revise --change-file work/concept/media-v2-revision.json --apply --json",
+    }
 
 
 def _install_plan(project: Path, source_root: Path) -> list[str]:
@@ -106,6 +144,7 @@ def upgrade_workflow(
         }
     )
     install = _install_plan(project, source_root)
+    remediation = _media_revision_remediation(project)
     if not apply:
         return {
             "schema_version": "1.0",
@@ -115,6 +154,8 @@ def upgrade_workflow(
             "after": lock,
             "install": install,
             "preserved": ["docs/**", "work/**", "assets/**"],
+            "requires_concept_revision": remediation["required"],
+            "remediation": remediation,
         }
 
     vendor_root = project / ".aigame" / "vendor" / "aigame"
@@ -189,6 +230,7 @@ def upgrade_workflow(
             '''schema_version = "1.0"
 revision = 1
 grid_size = 16
+max_output_dimension = 128
 perspective = "top_down"
 directions = ["down", "left", "right", "up"]
 runtime_generation = "build_and_runtime"
@@ -203,6 +245,15 @@ cached_lookup_budget_ms = 1.0
 tile_atlas_budget_seconds = 1.0
 ''',
         )
+    else:
+        media_config = media_config_path.read_text(encoding="utf-8")
+        if "max_output_dimension" not in media_config:
+            media_config = media_config.replace(
+                "grid_size = 16\n",
+                "grid_size = 16\nmax_output_dimension = 128\n",
+                1,
+            )
+            _write_text(media_config_path, media_config)
     pixel_pack_path = project / ".aigame" / "capability-packs" / "pixel-media-v1.toml"
     if not pixel_pack_path.is_file():
         _write_text(
@@ -211,7 +262,7 @@ tile_atlas_budget_seconds = 1.0
 id = "pixel-media-v1"
 status = "implemented"
 implemented = true
-summary = "Deterministic 16x16 visual and 48 kHz procedural-audio media factory"
+summary = "Structured, fail-closed deterministic 16-128 px visual and 48 kHz procedural-audio media factory"
 activation = "aigame assets plan --apply --json"
 ''',
         )
@@ -284,13 +335,14 @@ or bypass independent review, staging-owner approval, production, release, rollb
         source_pack = {
             "schema_version": "1.0",
             "id": "core-topdown-v1",
-            "name": "Core Top-down 16x16",
+            "name": "Core Top-down Pixel Parts (16-128 px outputs)",
+            "pack_revision": 2,
             "license": "CC0-1.0",
             "grid_size": 16,
             "perspective": "top_down",
             "directions": ["down", "left", "right", "up"],
-            "body_families": ["humanoid", "compact_enemy"],
-            "parts": ["shadow", "body", "legs", "head", "front_weapon", "front_effect"],
+            "body_families": ["humanoid", "serpentine", "quadruped", "winged", "amorphous", "mechanical_vehicle"],
+            "parts": [],
             "provenance": "Original procedural coordinates; no LPC or third-party artwork is bundled.",
         }
         source_pack["sha256"] = fingerprint(source_pack)
@@ -369,4 +421,6 @@ providers, download models, or bypass provenance and Godot runtime validation.
         "after": lock,
         "install": install,
         "preserved": ["docs/**", "work/**", "assets/**"],
+        "requires_concept_revision": remediation["required"],
+        "remediation": remediation,
     }

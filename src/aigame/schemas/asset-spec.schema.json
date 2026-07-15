@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "AssetSpec",
   "type": "object",
-  "required": ["schema_version", "id", "revision", "status", "created_at", "updated_at", "input_fingerprint", "kind", "purpose", "source_refs", "runtime_paths", "recipe_ids", "required", "acceptance_criteria"],
+  "required": ["schema_version", "id", "revision", "status", "created_at", "updated_at", "input_fingerprint", "brief_id", "brief_fingerprint", "request_id", "kind", "purpose", "source_refs", "runtime_paths", "recipe_ids", "required", "acceptance_criteria"],
   "properties": {
     "schema_version": {"const": "1.0"},
     "id": {"type": "string", "pattern": "^ASP-[0-9]{4}$"},
@@ -11,6 +11,9 @@
     "created_at": {"type": "string", "format": "date-time"},
     "updated_at": {"type": "string", "format": "date-time"},
     "input_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "brief_id": {"type": "string", "pattern": "^ABR-[0-9]{4}$"},
+    "brief_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "request_id": {"type": "string", "pattern": "^ARQ-[0-9]{4}$"},
     "kind": {"enum": ["sprite", "animation", "tileset", "particle", "ui", "sound", "ambience", "music"]},
     "purpose": {"type": "string", "minLength": 1},
     "source_refs": {"type": "array", "items": {"type": "string"}, "minItems": 1, "uniqueItems": true},

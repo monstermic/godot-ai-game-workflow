@@ -1,0 +1,280 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MediaRequest",
+  "type": "object",
+  "required": ["schema_version", "id", "revision", "status", "created_at", "updated_at", "input_fingerprint", "family", "subtype", "purpose", "source_refs", "dependencies", "references", "control", "specification", "output_contract", "accessibility", "acceptance_criteria"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "id": {"type": "string", "pattern": "^ARQ-[0-9]{4}$"},
+    "revision": {"type": "integer", "minimum": 1},
+    "status": {"enum": ["approved", "rework", "deprecated"]},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"},
+    "input_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "family": {"enum": ["sprite", "animation", "tileset", "particle", "ui", "sound", "ambience", "music"]},
+    "subtype": {"type": "string", "pattern": "^[a-z0-9_]+$"},
+    "purpose": {"type": "string", "minLength": 1},
+    "source_refs": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "uniqueItems": true},
+    "dependencies": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "references": {"$ref": "#/$defs/references"},
+    "control": {"$ref": "#/$defs/control"},
+    "specification": {"type": "object", "minProperties": 1},
+    "output_contract": {
+      "type": "object",
+      "required": ["runtime_formats", "metadata_format", "validation_profile"],
+      "properties": {
+        "runtime_formats": {"type": "array", "items": {"type": "string"}, "minItems": 1, "uniqueItems": true},
+        "metadata_format": {"type": "string", "minLength": 1},
+        "validation_profile": {"const": "pixel-media-v1"}
+      },
+      "additionalProperties": true
+    },
+    "accessibility": {
+      "type": "object",
+      "required": ["alternatives"],
+      "properties": {"alternatives": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}},
+      "additionalProperties": true
+    },
+    "acceptance_criteria": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1}
+  },
+  "$defs": {
+    "pixelDimensions": {
+      "type": "array",
+      "prefixItems": [
+        {"type": "integer", "minimum": 16, "maximum": 128, "multipleOf": 16},
+        {"type": "integer", "minimum": 16, "maximum": 128, "multipleOf": 16}
+      ],
+      "items": false
+    },
+    "animationClip": {
+      "type": "object",
+      "required": ["name", "frames", "fps", "loop", "events"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "frames": {"type": "integer", "minimum": 1},
+        "fps": {"type": "number", "exclusiveMinimum": 0},
+        "loop": {"type": "boolean"},
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["frame", "event"],
+            "properties": {
+              "frame": {"type": "integer", "minimum": 0},
+              "event": {"type": "string", "minLength": 1}
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "stringArray": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "audioEnvelope": {
+      "type": "object",
+      "required": ["attack", "decay", "sustain", "release"],
+      "properties": {
+        "attack": {"type": "number", "minimum": 0},
+        "decay": {"type": "number", "minimum": 0},
+        "sustain": {"type": "number", "minimum": 0, "maximum": 1},
+        "release": {"type": "number", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "references": {
+      "type": "object",
+      "required": ["canonical", "structural", "stylistic", "negative"],
+      "properties": {
+        "canonical": {"type": "array", "items": {"type": "string"}},
+        "structural": {"type": "array", "items": {"type": "string"}},
+        "stylistic": {"type": "array", "items": {"type": "string"}},
+        "negative": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": false
+    },
+    "control": {
+      "type": "object",
+      "required": ["locked", "variable", "generator_decides", "negative_constraints", "seed"],
+      "properties": {
+        "locked": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "variable": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "generator_decides": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "negative_constraints": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "seed": {"type": "integer"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"family": {"enum": ["sprite", "animation", "tileset", "particle", "ui"]}}},
+      "then": {
+        "properties": {
+          "specification": {
+            "required": ["dimensions"],
+            "properties": {"dimensions": {"$ref": "#/$defs/pixelDimensions"}}
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"family": {"enum": ["sprite", "animation"]}}},
+      "then": {
+        "properties": {
+          "specification": {
+            "required": ["subject_kind", "directions", "anchors"],
+            "properties": {
+              "subject_kind": {"enum": ["actor", "style_sample"]},
+              "body_family": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+              "body_tags": {"$ref": "#/$defs/stringArray"},
+              "surface_tags": {"$ref": "#/$defs/stringArray"},
+              "silhouette_tags": {"$ref": "#/$defs/stringArray"},
+              "equipment_tags": {"$ref": "#/$defs/stringArray"},
+              "directions": {"const": ["down", "left", "right", "up"]},
+              "anchors": {
+                "type": "array",
+                "items": {"enum": ["origin", "ground", "center", "head", "action_primary", "action_secondary", "projectile", "effect"]},
+                "minItems": 8,
+                "maxItems": 8,
+                "uniqueItems": true
+              }
+            },
+            "allOf": [
+              {
+                "if": {"properties": {"subject_kind": {"const": "actor"}}},
+                "then": {"required": ["body_family", "body_tags", "surface_tags", "silhouette_tags", "equipment_tags"]}
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"family": {"const": "animation"}}},
+      "then": {
+        "properties": {
+          "specification": {
+            "required": ["clips", "root_motion", "interruptibility", "mechanic_state_bindings"],
+            "properties": {
+              "clips": {"type": "array", "items": {"$ref": "#/$defs/animationClip"}, "minItems": 1},
+              "root_motion": {"type": "string", "minLength": 1},
+              "interruptibility": {"type": "object", "additionalProperties": {"type": "boolean"}},
+              "mechanic_state_bindings": {"type": "object", "additionalProperties": {"type": "string", "minLength": 1}}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"family": {"const": "tileset"}}},
+      "then": {
+        "properties": {
+          "specification": {
+            "required": ["biome", "terrain_roles", "materials", "transitions", "neighbor_masks", "collision", "navigation", "hazards", "variations", "stage_constraints"],
+            "properties": {
+              "biome": {"type": "string", "minLength": 1},
+              "terrain_roles": {"$ref": "#/$defs/stringArray", "minItems": 1},
+              "materials": {"$ref": "#/$defs/stringArray", "minItems": 1},
+              "transitions": {"$ref": "#/$defs/stringArray", "minItems": 1},
+              "neighbor_masks": {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 255}, "minItems": 256, "maxItems": 256, "uniqueItems": true},
+              "collision": {"type": "string", "minLength": 1},
+              "navigation": {"type": "string", "minLength": 1},
+              "hazards": {"$ref": "#/$defs/stringArray"},
+              "variations": {"type": "object"},
+              "stage_constraints": {"type": "object"}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"family": {"const": "particle"}}},
+      "then": {
+        "properties": {
+          "specification": {
+            "required": ["ownership", "phases", "event_timing", "shape_cues", "budgets"],
+            "properties": {
+              "ownership": {"type": "string", "minLength": 1},
+              "phases": {"$ref": "#/$defs/stringArray", "minItems": 1},
+              "event_timing": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "number", "minimum": 0}},
+              "shape_cues": {"$ref": "#/$defs/stringArray", "minItems": 1},
+              "budgets": {
+                "type": "object",
+                "required": ["max_particles", "max_overdraw_cells"],
+                "properties": {
+                  "max_particles": {"type": "integer", "minimum": 1},
+                  "max_overdraw_cells": {"type": "integer", "minimum": 1}
+                },
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"family": {"const": "ui"}}},
+      "then": {
+        "properties": {
+          "subtype": {"enum": ["icon", "cursor", "marker", "frame", "panel", "nine_slice"]},
+          "specification": {
+            "required": ["states", "inputs", "safe_areas", "localization", "focus", "contrast_ratio"],
+            "properties": {
+              "states": {"$ref": "#/$defs/stringArray", "minItems": 1},
+              "inputs": {"$ref": "#/$defs/stringArray", "minItems": 1},
+              "safe_areas": {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 128}, "minItems": 4, "maxItems": 4},
+              "localization": {"type": "string", "minLength": 1},
+              "focus": {"type": "string", "minLength": 1},
+              "contrast_ratio": {"type": "number", "minimum": 3}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"family": {"enum": ["sound", "ambience", "music"]}}},
+      "then": {
+        "properties": {
+          "specification": {
+            "required": ["event_tags", "material_tags", "envelope", "duration_seconds", "variants", "synchronization", "loop", "spatial_behavior", "priority", "concurrency"],
+            "properties": {
+              "event_tags": {"$ref": "#/$defs/stringArray", "minItems": 1},
+              "material_tags": {"$ref": "#/$defs/stringArray"},
+              "envelope": {"$ref": "#/$defs/audioEnvelope"},
+              "duration_seconds": {"type": "number", "exclusiveMinimum": 0},
+              "variants": {"type": "integer", "minimum": 1},
+              "synchronization": {"type": "string", "minLength": 1},
+              "loop": {"type": "boolean"},
+              "spatial_behavior": {"type": "string", "minLength": 1},
+              "priority": {"type": "integer"},
+              "concurrency": {"type": "integer", "minimum": 1}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"family": {"const": "music"}}},
+      "then": {
+        "properties": {
+          "specification": {
+            "required": ["tempo", "meter", "key", "stems", "transitions", "loudness_lufs"],
+            "properties": {
+              "tempo": {"type": "number", "exclusiveMinimum": 0},
+              "meter": {"type": "string", "minLength": 1},
+              "key": {"type": "string", "minLength": 1},
+              "stems": {"$ref": "#/$defs/stringArray", "minItems": 1},
+              "transitions": {"type": "array", "items": {"type": "number", "minimum": 0}, "uniqueItems": true},
+              "loudness_lufs": {"type": "number", "maximum": 0}
+            }
+          }
+        }
+      }
+    }
+  ],
+  "additionalProperties": true
+}

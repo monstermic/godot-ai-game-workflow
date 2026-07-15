@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import re
 import subprocess
 import tempfile
 import unittest
@@ -23,6 +24,7 @@ from aigame.concept import (
 from aigame.core import WorkflowError, fingerprint
 from aigame.context import build_context
 from aigame.generator import create_game
+from aigame.media import _collect_needs
 from aigame.validation import validate_project
 
 
@@ -293,6 +295,269 @@ def game_arc_result() -> dict:
     }
 
 
+def media_direction_result(*, size: int = 16) -> dict:
+    return {
+        "art": {
+            "style": "readable indexed pixel art",
+            "perspective": "top_down",
+            "frame_size": [size, size],
+            "tile_size": [size, size],
+            "outline": "one logical pixel selective outline",
+            "shading": "three value bands",
+            "light_direction": "upper_left",
+            "palette": {
+                "transparent": "#00000000",
+                "outline": "#171526ff",
+                "shadow": "#29243dff",
+                "dark": "#45415fff",
+                "mid": "#6f6a8aff",
+                "light": "#b7b2d0ff",
+                "primary": "#e66b3dff",
+                "secondary": "#f7c95cff",
+                "danger": "#d94b64ff",
+                "safe": "#58c9a3ff",
+            },
+            "reserved_colors": {"danger": "#d94b64ff", "safe": "#58c9a3ff"},
+            "readability": "distinct silhouettes and color-independent state cues",
+        },
+        "audio": {
+            "identity": "mechanical rhythm with warm ember motifs",
+            "sample_rate": 48000,
+            "bit_depth": 16,
+            "peak_dbfs": -1,
+            "spatialization": "event-defined mono or stereo",
+            "looping": "seamless boundaries for ambience and music",
+        },
+        "accessibility": {
+            "color_independent_cues": True,
+            "reduced_flash": True,
+            "reduced_motion": True,
+            "audio_alternatives": True,
+        },
+        "technical": {
+            "engine": "Godot 4.7",
+            "image_format": "png",
+            "image_mode": "indexed",
+            "filter": "nearest",
+            "background": "transparent",
+            "budgets": {"max_visual_compile_ms": 500, "max_audio_compile_ms": 1000},
+        },
+        "references": {"canonical": [], "structural": [], "stylistic": [], "negative": []},
+        "control": {
+            "locked": ["art.frame_size", "art.tile_size", "art.palette", "audio.sample_rate", "audio.bit_depth"],
+            "variable": [],
+            "generator_decides": ["micro_variation"],
+            "negative_constraints": ["no silent semantic downgrade", "no dimension above 128"],
+        },
+    }
+
+
+def media_request_for_need(index: int, need: dict, *, size: int = 16) -> dict:
+    family = str(need["kind"])
+    subtype = {
+        "sprite": "actor" if str(need["source_ref"]).startswith("CNT-") else "representative_sample",
+        "animation": "actor_set",
+        "tileset": "terrain_atlas",
+        "particle": "telegraph_vfx",
+        "ui": "panel",
+        "sound": "event_sfx",
+        "ambience": "environment_loop",
+        "music": "adaptive_score",
+    }[family]
+    specification: dict = {"dimensions": [size, size]}
+    if family in {"sprite", "animation"}:
+        specification.update(
+            {
+                "subject_kind": "actor" if subtype != "representative_sample" else "style_sample",
+                "body_tags": ["biped"] if subtype != "representative_sample" else [],
+                "surface_tags": ["cloth"] if subtype != "representative_sample" else [],
+                "silhouette_tags": ["upright"] if subtype != "representative_sample" else [],
+                "equipment_tags": [],
+                "directions": ["down", "left", "right", "up"],
+                "anchors": ["origin", "ground", "center", "head", "action_primary", "action_secondary", "projectile", "effect"],
+            }
+        )
+        if subtype != "representative_sample":
+            specification["body_family"] = "humanoid"
+        if family == "animation":
+            specification.update(
+                {
+                    "clips": [
+                        {"name": "idle", "frames": 4, "fps": 8, "loop": True, "events": []},
+                        {"name": "move", "frames": 6, "fps": 12, "loop": True, "events": [{"frame": 3, "event": "footstep"}]},
+                        {"name": "primary_attack", "frames": 6, "fps": 12, "loop": False, "events": [{"frame": 3, "event": "action_primary"}]},
+                        {"name": "hit", "frames": 3, "fps": 12, "loop": False, "events": []},
+                        {"name": "death", "frames": 8, "fps": 10, "loop": False, "events": []},
+                        {"name": "spawn", "frames": 6, "fps": 10, "loop": False, "events": []},
+                    ],
+                    "root_motion": "none",
+                    "interruptibility": {"idle": True, "move": True, "primary_attack": False, "hit": False, "death": False, "spawn": False},
+                    "mechanic_state_bindings": {},
+                }
+            )
+    elif family == "tileset":
+        specification.update(
+            {
+                "biome": str(need["purpose"]),
+                "terrain_roles": ["ground", "wall", "edge", "corner"],
+                "materials": ["brass", "stone"],
+                "transitions": ["ground_to_wall"],
+                "neighbor_masks": list(range(256)),
+                "collision": "walls block actors",
+                "navigation": "ground is navigable",
+                "hazards": [],
+                "variations": {"seeded": True, "count": 2},
+                "stage_constraints": {"entrance_exit_connected": True},
+            }
+        )
+    elif family == "particle":
+        specification.update(
+            {
+                "ownership": str(need["source_ref"]),
+                "phases": ["telegraph", "active", "impact", "recovery"],
+                "event_timing": {"telegraph": 0.0, "active": 0.2, "impact": 0.4, "recovery": 0.5},
+                "shape_cues": ["radial"],
+                "budgets": {"max_particles": 32, "max_overdraw_cells": 4},
+            }
+        )
+    elif family == "ui":
+        specification.update(
+            {
+                "states": ["normal", "focused", "disabled"],
+                "inputs": ["keyboard", "controller"],
+                "safe_areas": [0, 0, size, size],
+                "localization": "expandable labels",
+                "focus": "visible non-color-only outline",
+                "contrast_ratio": 4.5,
+            }
+        )
+    else:
+        specification = {
+            "event_tags": [family],
+            "material_tags": ["mechanical"],
+            "envelope": {"attack": 0.005, "decay": 0.03, "sustain": 0.82, "release": 0.02},
+            "duration_seconds": 8.0 if family == "music" else (4.0 if family == "ambience" else 0.18),
+            "variants": 3 if family in {"sound", "music"} else 1,
+            "synchronization": "event boundary",
+            "loop": family in {"ambience", "music"},
+            "spatial_behavior": "stereo" if family in {"ambience", "music"} else "mono positional",
+            "priority": 50,
+            "concurrency": 4,
+        }
+        if family == "music":
+            specification.update({"tempo": 120, "meter": "4/4", "key": "A minor", "stems": ["explore", "combat", "boss"], "transitions": [0, 2, 4, 6, 8], "loudness_lufs": -16})
+    locked_fields = ["family", "subtype"]
+    if family in {"sprite", "animation", "tileset", "particle", "ui"}:
+        locked_fields.append("specification.dimensions")
+    if family in {"sprite", "animation"} and specification.get("subject_kind") == "actor":
+        locked_fields.extend(
+            [
+                "specification.body_family",
+                "specification.directions",
+                "specification.anchors",
+                "specification.equipment_tags",
+            ]
+        )
+    if family == "animation":
+        locked_fields.extend(
+            [
+                "specification.clips",
+                "specification.root_motion",
+                "specification.mechanic_state_bindings",
+            ]
+        )
+    if family in {"sound", "ambience", "music"}:
+        locked_fields.extend(
+            [
+                "specification.envelope",
+                "specification.duration_seconds",
+                "specification.synchronization",
+                "specification.loop",
+            ]
+        )
+    return {
+        "id": f"ARQ-{index:04d}",
+        "family": family,
+        "subtype": subtype,
+        "purpose": str(need["purpose"]),
+        "source_refs": [str(need["source_ref"])],
+        "dependencies": [],
+        "references": {"canonical": [], "structural": [], "stylistic": [], "negative": []},
+        "control": {
+            "locked": locked_fields,
+            "variable": ["micro_variation"],
+            "generator_decides": [],
+            "negative_constraints": ["no incompatible body family", "no semantic fallback"],
+            "seed": index * 7919,
+        },
+        "specification": specification,
+        "output_contract": {
+            "runtime_formats": ["wav", "tres"] if family in {"sound", "ambience", "music"} else (["png", "tres"] if family in {"animation", "tileset"} else (["png", "tscn"] if family == "particle" else ["png"])),
+            "metadata_format": "json",
+            "validation_profile": "pixel-media-v1",
+        },
+        "accessibility": {"alternatives": ["synchronized non-exclusive cue"]},
+        "acceptance_criteria": ["The deterministic output satisfies the structured request."],
+    }
+
+
+def asset_specification_result(root: Path, *, size: int = 16) -> dict:
+    needs, _ = _collect_needs(root, require_finalized=False)
+    mechanic_animation_needs = [
+        need
+        for need in needs
+        if need["kind"] == "animation" and str(need["source_ref"]).startswith("MEC-")
+    ]
+    actor_animation_need = next(
+        (
+            need
+            for need in needs
+            if need["kind"] == "animation"
+            and str(need["source_ref"]).startswith("CNT-")
+        ),
+        None,
+    )
+    requests = []
+    consumed_sources = {
+        str(need["source_ref"]) for need in mechanic_animation_needs
+    } if actor_animation_need else set()
+    for index, need in enumerate(needs, 1):
+        if str(need["source_ref"]) in consumed_sources:
+            continue
+        request = media_request_for_need(index, need, size=size)
+        if actor_animation_need is need:
+            request["source_refs"].extend(
+                str(value["source_ref"]) for value in mechanic_animation_needs
+            )
+            clips = request["specification"]["clips"]
+            clip_names = {str(clip["name"]) for clip in clips}
+            bindings = request["specification"]["mechanic_state_bindings"]
+            for animation_need in mechanic_animation_needs:
+                source_ref = str(animation_need["source_ref"])
+                if ".state." in source_ref:
+                    state_name = source_ref.split(".state.", 1)[1]
+                    clip_name = re.sub(r"[^a-z0-9_]+", "_", state_name.lower()).strip("_")
+                    if clip_name not in clip_names:
+                        clips.append(
+                            {
+                                "name": clip_name,
+                                "frames": 4,
+                                "fps": 10,
+                                "loop": clip_name in {"ready", "cooldown"},
+                                "events": [],
+                            }
+                        )
+                        clip_names.add(clip_name)
+                    bindings[source_ref] = clip_name
+                else:
+                    bindings[source_ref] = "primary_attack"
+        requests.append(request)
+    return {
+        "media_direction": media_direction_result(size=size),
+        "media_requests": requests,
+    }
+
+
 def audit_result(root: Path) -> dict:
     assessments = []
     for path in sorted((root / ".aigame" / "profiles").glob("*.json")):
@@ -391,10 +656,16 @@ class ConceptBlueprintTests(unittest.TestCase):
     def _advance_to_audit_task(self) -> None:
         self._advance_to_arc_task()
         submit_concept_task(self.root, "CTK-0005", game_arc_result(), apply=True)
+        submit_concept_task(
+            self.root,
+            "CTK-0006",
+            asset_specification_result(self.root),
+            apply=True,
+        )
 
     def _advance_to_final_gate(self) -> dict:
         self._advance_to_audit_task()
-        return submit_concept_task(self.root, "CTK-0006", audit_result(self.root), apply=True)
+        return submit_concept_task(self.root, "CTK-0007", audit_result(self.root), apply=True)
 
     def test_generated_project_contains_v11_contracts_profiles_and_concept_entrypoint(self) -> None:
         schemas = {
@@ -409,6 +680,8 @@ class ConceptBlueprintTests(unittest.TestCase):
             "game-definition-of-done.schema.json",
             "game-roadmap.schema.json",
             "concept-task.schema.json",
+            "media-direction.schema.json",
+            "media-request.schema.json",
         }
         self.assertTrue(all((self.root / ".aigame" / "schemas" / name).is_file() for name in schemas))
         core = json.loads((self.root / ".aigame" / "profiles" / "core-game-v1.json").read_text(encoding="utf-8"))
@@ -418,6 +691,34 @@ class ConceptBlueprintTests(unittest.TestCase):
         self.assertTrue((self.root / ".aigame" / "state" / "concept.json").is_file())
         self.assertIn("aigame concept next", (self.root / "AGENTS.md").read_text(encoding="utf-8"))
         self.assertTrue((self.root / ".aigame" / "agent-skills" / "build-game-concept" / "SKILL.md").is_file())
+
+    def test_complete_arc_opens_asset_specification_before_quality_audit(self) -> None:
+        self._advance_to_arc_task()
+        completed = submit_concept_task(
+            self.root,
+            "CTK-0005",
+            game_arc_result(),
+            apply=True,
+        )
+        self.assertEqual("asset_specification", completed["concept_task"]["stage"])
+        self.assertIn("media-direction.schema.json", completed["concept_task"]["result_contract"])
+        self.assertIn("media-request.schema.json[]", completed["concept_task"]["result_contract"])
+
+    def test_asset_specification_requires_exhaustive_structured_coverage(self) -> None:
+        self._advance_to_arc_task()
+        submit_concept_task(self.root, "CTK-0005", game_arc_result(), apply=True)
+        complete = asset_specification_result(self.root)
+        incomplete = json.loads(json.dumps(complete))
+        missing = incomplete["media_requests"].pop()["source_refs"][0]
+        with self.assertRaisesRegex(WorkflowError, missing.replace("[", r"\[").replace("]", r"\]")):
+            submit_concept_task(self.root, "CTK-0006", incomplete, apply=True)
+        completed = submit_concept_task(self.root, "CTK-0006", complete, apply=True)
+        self.assertEqual("quality_audit", completed["concept_task"]["stage"])
+        self.assertTrue((self.root / "work/concept/MDR-0001.json").is_file())
+        self.assertEqual(
+            len(complete["media_requests"]),
+            len(list((self.root / "work/concept/media_requests").glob("ARQ-*.json"))),
+        )
 
     def test_start_is_dry_run_safe_and_treats_prompt_as_inert_data(self) -> None:
         marker = self.root / "owned.txt"
@@ -534,9 +835,9 @@ class ConceptBlueprintTests(unittest.TestCase):
         invalid = audit_result(self.root)
         invalid["quality_assessment"]["assessments"].pop()
         with self.assertRaisesRegex(WorkflowError, "quality profile item"):
-            submit_concept_task(self.root, "CTK-0006", invalid, apply=True)
+            submit_concept_task(self.root, "CTK-0007", invalid, apply=True)
         task = next_concept_task(self.root)["concept_task"]
-        self.assertEqual(task["id"], "CTK-0006")
+        self.assertEqual(task["id"], "CTK-0007")
         self.assertEqual(task["status"], "ready")
 
     def test_interrupted_transition_keeps_the_active_task_retryable(self) -> None:

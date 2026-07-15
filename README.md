@@ -64,7 +64,7 @@ Codex, OpenCode, Claude Code, Cursor, and Copilot adapters are instruction shims
 - Resumable concept, context, and checkpoint records.
 - Safe, idempotent GitHub issue mirroring.
 - Optional JSON-over-stdio image/audio adapters with strict provenance.
-- A CPU-only 16x16 media factory for modular sprites, complete animation sets, terrain atlases, seeded connected stages, particles, UI, SFX variants, ambience, and adaptive music stems.
+- A CPU-only, structured and fail-closed 16–128 px media factory for family-specific modular sprites, complete animation sets, terrain atlases, seeded connected stages, particles, explicit UI subtypes, SFX variants, ambience, and adaptive music stems.
 - A tested 2D Godot reference slice with movement, hazard, win/loss, reward, and restart.
 - Reusable GitHub Actions for contracts, Godot tests/export, provenance, review, RCs, and same-artifact release.
 - Apache-2.0 workflow tooling with separately licensed generated game output.
@@ -73,4 +73,4 @@ See [concept blueprint](docs/concept-blueprint.md), [pixel media factory](docs/p
 
 ## Status
 
-V1.3 targets offline top-down 2D GDScript games, 16x16 pixel media, procedural chiptune audio, and Windows desktop exports. The concept engine is genre-neutral and ships universal plus roguelite quality profiles. Capability packs describe 3D, narrative, localization, persistence, mobile, networking, and other future extensions without pretending those pipelines are already implemented.
+V1.4 targets offline top-down 2D GDScript games, indexed 16–128 px media, procedural chiptune audio, and Windows desktop exports. The concept engine is genre-neutral and ships universal plus roguelite quality profiles. Capability packs describe 3D, narrative, localization, persistence, mobile, networking, and other future extensions without pretending those pipelines are already implemented.

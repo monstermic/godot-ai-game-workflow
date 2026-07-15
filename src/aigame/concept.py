@@ -22,6 +22,7 @@ CONCEPT_STAGES = (
     "mechanics",
     "content_catalog",
     "complete_game_arc",
+    "asset_specification",
     "quality_audit",
 )
 STAGE_CONTRACTS = {
@@ -30,6 +31,7 @@ STAGE_CONTRACTS = {
     "mechanics": "mechanic-spec.schema.json[]",
     "content_catalog": "name-registry.schema.json + content-entry.schema.json[]",
     "complete_game_arc": "game-blueprint.schema.json",
+    "asset_specification": "media-direction.schema.json + media-request.schema.json[]",
     "quality_audit": "quality-assessment + game-definition-of-done + game-roadmap",
 }
 STAGE_INSTRUCTIONS = {
@@ -60,6 +62,11 @@ STAGE_INSTRUCTIONS = {
         "Link the release scope to every mechanic and content record and classify entries as must, optional, or cut.",
         "Narrative games require complete macro arcs; non-narrative games require an explicit not-applicable rationale and complete experiential arc.",
     ],
+    "asset_specification": [
+        "Define the global locked art, audio, accessibility, and technical media direction.",
+        "Create one or more structured media requests that exhaustively cover every required blueprint media source.",
+        "Use explicit family and subtype contracts; free-text purpose is descriptive and never selects generation behavior.",
+    ],
     "quality_audit": [
         "Classify every active profile item as required, optional, or not applicable with rationale.",
         "Create a game-level Definition of Done covering every must-scope mechanic and content entry.",
@@ -75,6 +82,8 @@ SCHEMA_BY_PREFIX = {
     "CNT": "content-entry.schema.json",
     "NAM": "name-registry.schema.json",
     "BLU": "game-blueprint.schema.json",
+    "MDR": "media-direction.schema.json",
+    "ARQ": "media-request.schema.json",
     "QAS": "quality-assessment.schema.json",
     "GDD": "game-definition-of-done.schema.json",
     "RMP": "game-roadmap.schema.json",
@@ -89,6 +98,26 @@ PROCEDURAL_KINDS = {
     "pool_entry",
     "procedural_template",
 }
+VISUAL_MEDIA_FAMILIES = {"sprite", "animation", "tileset", "particle", "ui"}
+ACTOR_BODY_FAMILIES = {
+    "humanoid",
+    "serpentine",
+    "quadruped",
+    "winged",
+    "amorphous",
+    "mechanical_vehicle",
+}
+NEUTRAL_ANCHORS = {
+    "origin",
+    "ground",
+    "center",
+    "head",
+    "action_primary",
+    "action_secondary",
+    "projectile",
+    "effect",
+}
+UI_SUBTYPES = {"icon", "cursor", "marker", "frame", "panel", "nine_slice"}
 
 
 def _now() -> str:
@@ -216,6 +245,7 @@ def _create_task(project: Path, state: dict[str, Any], stage: str) -> dict[str, 
             "mechanics": ["work/concept/PRD-0001.json"],
             "content_catalog": ["work/concept/mechanics"],
             "complete_game_arc": ["work/concept/mechanics", "work/concept/content"],
+            "asset_specification": ["work/concept", "work/concept/mechanics", "work/concept/content"],
             "quality_audit": ["work/concept", ".aigame/profiles"],
         }.get(stage, [])
     )
@@ -610,6 +640,236 @@ def _blueprint_scope_errors(
     return errors
 
 
+def _media_contract_errors(
+    project: Path,
+    direction: dict[str, Any],
+    requests: Iterable[dict[str, Any]],
+) -> list[str]:
+    errors: list[str] = []
+    values = list(requests)
+    try:
+        from .media import _collect_needs
+
+        expected_needs, _ = _collect_needs(project, require_finalized=False)
+    except WorkflowError as error:
+        return [str(error)]
+    expected_sources = {str(need["source_ref"]) for need in expected_needs}
+    content_by_id = {
+        str(record["id"]): record for record in _concept_records(project)["content"]
+    }
+    supported_body_families = set(ACTOR_BODY_FAMILIES)
+    try:
+        from .media import _external_body_family_definitions
+
+        supported_body_families.update(_external_body_family_definitions(project))
+    except WorkflowError as error:
+        errors.append(str(error))
+    source_to_requests: dict[str, list[str]] = {}
+    for request in values:
+        for source_ref in request.get("source_refs", []):
+            source_to_requests.setdefault(str(source_ref), []).append(str(request["id"]))
+    for source_ref in sorted(expected_sources - set(source_to_requests)):
+        errors.append(f"unmapped blueprint media source {source_ref}")
+    for source_ref in sorted(set(source_to_requests) - expected_sources):
+        errors.append(f"stale blueprint media source {source_ref}")
+    for source_ref, request_ids in sorted(source_to_requests.items()):
+        if len(request_ids) != 1:
+            errors.append(
+                f"duplicate blueprint media source {source_ref}: {', '.join(request_ids)}"
+            )
+
+    frame_size = direction.get("art", {}).get("frame_size")
+    tile_size = direction.get("art", {}).get("tile_size")
+    direction_locked = set(map(str, direction.get("control", {}).get("locked", [])))
+    required_direction_locks = {
+        "art.frame_size",
+        "art.tile_size",
+        "art.palette",
+        "audio.sample_rate",
+        "audio.bit_depth",
+    }
+    if not required_direction_locks.issubset(direction_locked):
+        errors.append(
+            "MDR-0001: media scale, palette, sample rate, and bit depth must be locked"
+        )
+    required_palette = {
+        "transparent",
+        "outline",
+        "shadow",
+        "dark",
+        "mid",
+        "light",
+        "primary",
+        "secondary",
+        "danger",
+        "safe",
+    }
+    if not required_palette.issubset(direction.get("art", {}).get("palette", {})):
+        errors.append("MDR-0001: semantic indexed palette is incomplete")
+    if not direction.get("control", {}).get("negative_constraints"):
+        errors.append("MDR-0001: negative constraints must be explicit")
+    for request in values:
+        request_id = str(request["id"])
+        family = str(request.get("family", ""))
+        subtype = str(request.get("subtype", ""))
+        specification = request.get("specification", {})
+        locked = set(map(str, request.get("control", {}).get("locked", [])))
+        if not {"family", "subtype"}.issubset(locked):
+            errors.append(f"{request_id}: family and subtype must be locked")
+        if family in VISUAL_MEDIA_FAMILIES:
+            dimensions = specification.get("dimensions")
+            if dimensions != (tile_size if family == "tileset" else frame_size):
+                errors.append(
+                    f"{request_id}: dimensions must match the locked media direction"
+                )
+            if "specification.dimensions" not in locked:
+                errors.append(f"{request_id}: specification.dimensions must be locked")
+        if family in {"sprite", "animation"}:
+            subject_kind = specification.get("subject_kind")
+            if subject_kind == "actor":
+                body_family = specification.get("body_family")
+                if body_family not in supported_body_families:
+                    errors.append(f"{request_id}: unsupported body_family {body_family!r}")
+                for field in (
+                    "body_tags",
+                    "surface_tags",
+                    "silhouette_tags",
+                    "equipment_tags",
+                ):
+                    if not isinstance(specification.get(field), list):
+                        errors.append(f"{request_id}: actor specification requires {field}")
+                if specification.get("directions") != ["down", "left", "right", "up"]:
+                    errors.append(f"{request_id}: actor specification requires four directions")
+                anchors = specification.get("anchors")
+                if set(map(str, anchors or [])) != NEUTRAL_ANCHORS:
+                    errors.append(f"{request_id}: actor specification requires neutral anchors")
+                required_actor_locks = {
+                    "specification.body_family",
+                    "specification.directions",
+                    "specification.anchors",
+                    "specification.equipment_tags",
+                }
+                if not required_actor_locks.issubset(locked):
+                    errors.append(
+                        f"{request_id}: actor family, directions, anchors, and equipment must be locked"
+                    )
+            elif not (family == "sprite" and subtype == "representative_sample" and subject_kind == "style_sample"):
+                errors.append(f"{request_id}: unsupported or ambiguous sprite subject")
+            if family == "animation":
+                for field in (
+                    "clips",
+                    "root_motion",
+                    "interruptibility",
+                    "mechanic_state_bindings",
+                ):
+                    if field not in specification:
+                        errors.append(f"{request_id}: animation specification requires {field}")
+                if not {
+                    "specification.clips",
+                    "specification.root_motion",
+                    "specification.mechanic_state_bindings",
+                }.issubset(locked):
+                    errors.append(
+                        f"{request_id}: animation clips, timing, root motion, and bindings must be locked"
+                    )
+                state_sources = [
+                    str(source_ref)
+                    for source_ref in request.get("source_refs", [])
+                    if ".state." in str(source_ref)
+                ]
+                actor_sources = [
+                    str(source_ref)
+                    for source_ref in request.get("source_refs", [])
+                    if str(source_ref).startswith("CNT-")
+                ]
+                if state_sources and not actor_sources:
+                    errors.append(
+                        f"{request_id}: mechanic-state animations must be consolidated into a linked content actor request"
+                    )
+                for source_ref in state_sources:
+                    mechanic_id = source_ref.split(".", 1)[0]
+                    linked = any(
+                        mechanic_id
+                        in content_by_id.get(actor_source.split(".", 1)[0], {}).get(
+                            "mechanic_ids", []
+                        )
+                        for actor_source in actor_sources
+                    )
+                    if not linked:
+                        errors.append(
+                            f"{request_id}: {source_ref} is not linked to the content actor"
+                        )
+                bindings = specification.get("mechanic_state_bindings", {})
+                for source_ref in state_sources:
+                    if source_ref not in bindings:
+                        errors.append(
+                            f"{request_id}: incomplete animation binding for {source_ref}"
+                        )
+        elif family == "tileset":
+            required = {
+                "biome",
+                "terrain_roles",
+                "materials",
+                "transitions",
+                "neighbor_masks",
+                "collision",
+                "navigation",
+                "hazards",
+                "variations",
+                "stage_constraints",
+            }
+            missing = sorted(required - set(specification))
+            if missing:
+                errors.append(f"{request_id}: tileset specification missing {', '.join(missing)}")
+            if specification.get("neighbor_masks") != list(range(256)):
+                errors.append(f"{request_id}: tileset requires all 256 neighbor masks")
+        elif family == "particle":
+            required = {"ownership", "phases", "event_timing", "shape_cues", "budgets"}
+            missing = sorted(required - set(specification))
+            if missing:
+                errors.append(f"{request_id}: VFX specification missing {', '.join(missing)}")
+        elif family == "ui":
+            if subtype not in UI_SUBTYPES:
+                errors.append(f"{request_id}: unsupported UI subtype {subtype!r}")
+            required = {"states", "inputs", "safe_areas", "localization", "focus", "contrast_ratio"}
+            missing = sorted(required - set(specification))
+            if missing:
+                errors.append(f"{request_id}: UI specification missing {', '.join(missing)}")
+        elif family in {"sound", "ambience", "music"}:
+            required = {
+                "event_tags",
+                "material_tags",
+                "envelope",
+                "duration_seconds",
+                "variants",
+                "synchronization",
+                "loop",
+                "spatial_behavior",
+                "priority",
+                "concurrency",
+            }
+            missing = sorted(required - set(specification))
+            if family == "music":
+                missing.extend(
+                    sorted(
+                        {"tempo", "meter", "key", "stems", "transitions", "loudness_lufs"}
+                        - set(specification)
+                    )
+                )
+            if missing:
+                errors.append(f"{request_id}: audio specification missing {', '.join(missing)}")
+            if not {
+                "specification.envelope",
+                "specification.duration_seconds",
+                "specification.synchronization",
+                "specification.loop",
+            }.issubset(locked):
+                errors.append(
+                    f"{request_id}: audio envelope, duration, synchronization, and looping must be locked"
+                )
+    return errors
+
+
 def _persist_many(project: Path, folder: str, records: Iterable[dict[str, Any]]) -> None:
     for record in records:
         _write_json(project / "work" / "concept" / folder / f"{record['id']}.json", record)
@@ -683,6 +943,8 @@ def _concept_records(project: Path) -> dict[str, list[dict[str, Any]]]:
         "content": (project / "work" / "concept" / "content", "CNT-*.json"),
         "names": (project / "work" / "concept", "NAM-*.json"),
         "blueprints": (project / "work" / "concept", "BLU-*.json"),
+        "media_directions": (project / "work" / "concept", "MDR-*.json"),
+        "media_requests": (project / "work" / "concept" / "media_requests", "ARQ-*.json"),
         "quality": (project / "work" / "concept", "QAS-*.json"),
         "dod": (project / "work" / "concept", "GDD-*.json"),
         "roadmaps": (project / "work" / "concept", "RMP-*.json"),
@@ -699,7 +961,7 @@ def _blueprint_scope(project: Path) -> str:
     return fingerprint(
         {
             key: records[key]
-            for key in ("intakes", "pitches", "products", "mechanics", "content", "names", "blueprints", "quality", "dod", "roadmaps")
+            for key in ("intakes", "pitches", "products", "mechanics", "content", "names", "blueprints", "media_directions", "media_requests", "quality", "dod", "roadmaps")
         }
     )
 
@@ -981,6 +1243,39 @@ def submit_concept_task(
         if not apply:
             return {"schema_version": SCHEMA_VERSION, "status": "dry_run", "blueprint": blueprint}
         _write_singleton(project, "BLU", blueprint)
+        next_task = _next_stage(project, state, task, "asset_specification")
+        _save_state(project, state)
+        _complete_task(project, task)
+        return {"schema_version": SCHEMA_VERSION, "status": "passed", "concept_task": next_task}
+
+    if stage == "asset_specification":
+        direction_value = payload.get("media_direction")
+        if not isinstance(direction_value, dict):
+            raise WorkflowError("asset_specification requires media_direction")
+        direction = _record(
+            direction_value,
+            record_id=str(direction_value.get("id", "MDR-0001")),
+            status="approved",
+        )
+        _assert_schema(direction, "media-direction.schema.json")
+        requests = _normalise_many(
+            payload.get("media_requests"),
+            prefix="ARQ",
+            status="approved",
+            schema_name="media-request.schema.json",
+        )
+        contract_errors = _media_contract_errors(project, direction, requests)
+        if contract_errors:
+            raise WorkflowError("; ".join(contract_errors))
+        if not apply:
+            return {
+                "schema_version": SCHEMA_VERSION,
+                "status": "dry_run",
+                "media_direction": direction,
+                "media_requests": requests,
+            }
+        _write_singleton(project, "MDR", direction)
+        _replace_many(project, "media_requests", "ARQ", requests)
         next_task = _next_stage(project, state, task, "quality_audit")
         _save_state(project, state)
         _complete_task(project, task)
@@ -1164,6 +1459,7 @@ def validate_concept(root: Path | str, *, require_final: bool = False) -> dict[s
         "products": "Product identity",
         "names": "Name registry",
         "blueprints": "Game blueprint",
+        "media_directions": "Media direction",
         "quality": "Quality assessment",
         "dod": "Game Definition of Done",
         "roadmaps": "Game roadmap",
@@ -1177,6 +1473,8 @@ def validate_concept(root: Path | str, *, require_final: bool = False) -> dict[s
         errors.append("Concept must define at least one mechanic")
     if not records["content"]:
         errors.append("Concept must define at least one named content entry")
+    if not records["media_requests"]:
+        errors.append("Concept must define at least one approved media request")
     red_assumptions = [
         assumption
         for intake in records["intakes"]
@@ -1191,7 +1489,7 @@ def validate_concept(root: Path | str, *, require_final: bool = False) -> dict[s
     ]
     if (red_assumptions or red_risks) and not is_ai_staging(project):
         errors.append("Unresolved red assumptions or risks require human resolution")
-    for key in ("products", "mechanics", "content", "names", "blueprints", "quality", "dod", "roadmaps"):
+    for key in ("products", "mechanics", "content", "names", "blueprints", "media_directions", "media_requests", "quality", "dod", "roadmaps"):
         for record in records[key]:
             for placeholder in _placeholder_paths(record):
                 errors.append(f"{record['id']}: required value is a placeholder at {placeholder}")
@@ -1248,6 +1546,14 @@ def validate_concept(root: Path | str, *, require_final: bool = False) -> dict[s
             errors.append("Game blueprint content references do not match the launch catalog")
         if not must_scope.issubset(set(blueprint.get("release_scope", {}).get("must", []))):
             errors.append("Game blueprint must-scope list omits required mechanics or content")
+    if records["media_directions"] and records["media_requests"]:
+        errors.extend(
+            _media_contract_errors(
+                project,
+                records["media_directions"][0],
+                records["media_requests"],
+            )
+        )
     if records["dod"]:
         covered = {
             str(scope_ref)
@@ -1470,6 +1776,54 @@ def _render_documents(project: Path) -> dict[str, str]:
                 ),
             ]
         )
+    if records["media_directions"]:
+        value = records["media_directions"][0]
+        documents["media-direction.md"] = "\n".join(
+            [
+                "# Media Direction",
+                "",
+                f"**Record:** `{value['id']}`",
+                f"**Fingerprint:** `{value['input_fingerprint']}`",
+                "",
+                "## Art",
+                "",
+                _value_text(value["art"]),
+                "",
+                "## Audio",
+                "",
+                _value_text(value["audio"]),
+                "",
+                "## Accessibility and technical constraints",
+                "",
+                _value_text(
+                    {
+                        "accessibility": value["accessibility"],
+                        "technical": value["technical"],
+                        "control": value["control"],
+                    }
+                ),
+            ]
+        )
+    if records["media_requests"]:
+        lines = [
+            "# Approved Media Requests",
+            "",
+            "| ID | Family | Subtype | Blueprint sources | Purpose |",
+            "|---|---|---|---|---|",
+        ]
+        for value in records["media_requests"]:
+            purpose = str(value["purpose"]).replace("|", "\\|")
+            lines.append(
+                f"| {value['id']} | {value['family']} | {value['subtype']} | "
+                f"{', '.join(value['source_refs'])} | {purpose} |"
+            )
+        lines.extend(
+            [
+                "",
+                "Generation behavior is selected only by these structured contracts; purpose text is descriptive.",
+            ]
+        )
+        documents["media-requests.md"] = "\n".join(lines)
     if records["mechanics"]:
         lines = ["# Implementation-Ready Mechanics", ""]
         for value in records["mechanics"]:
