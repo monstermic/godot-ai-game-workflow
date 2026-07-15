@@ -22,6 +22,122 @@ GODOT_WINDOWS_SHA512 = "41645a908eb3181d6f2d1201ed7b6d6f095f6a23aaed8903d5d25527
 GODOT_TEMPLATES_SHA512 = "1035dfde4edcc2472bb0c0b9610ce3ee9302642c2b9957e9066372f9f6bb759ab250c8887551a66f0bc5f51bbd9a58bb45e33a0f29844e97615a9b1138c1120e"
 
 
+def runtime_composer_source() -> str:
+    return '''class_name AIGameRuntimeComposer
+extends RefCounted
+
+const GRID_SIZE := 16
+const LAYER_SLOTS := [
+    "shadow", "rear_effect", "rear_weapon", "body", "legs", "torso",
+    "clothing", "armor", "head", "face", "hair", "front_weapon",
+    "offhand", "front_effect"
+]
+
+var _cache: Dictionary = {}
+
+func cache_key(recipe: Dictionary, seed: int, parts: Dictionary = {}) -> String:
+    var context := HashingContext.new()
+    context.start(HashingContext.HASH_SHA256)
+    context.update((JSON.stringify(recipe) + ":" + str(seed)).to_utf8_buffer())
+    var part_ids: Array = parts.keys()
+    part_ids.sort()
+    for part_id in part_ids:
+        context.update(("|" + str(part_id) + "|").to_utf8_buffer())
+        var source = parts[part_id]
+        var part_image: Image
+        if source is Texture2D:
+            part_image = source.get_image()
+        elif source is Image:
+            part_image = source
+        elif source is Dictionary:
+            context.update(JSON.stringify(source).to_utf8_buffer())
+        else:
+            context.update(str(source).to_utf8_buffer())
+        if part_image != null:
+            context.update(
+                (str(part_image.get_width()) + "x" + str(part_image.get_height()) + ":" + str(part_image.get_format())).to_utf8_buffer()
+            )
+            context.update(part_image.get_data())
+    return context.finish().hex_encode()
+
+func get_cached(recipe: Dictionary, seed: int, parts: Dictionary = {}) -> Texture2D:
+    return _cache.get(cache_key(recipe, seed, parts))
+
+func compose(recipe: Dictionary, parts: Dictionary, seed: int) -> Texture2D:
+    var key := cache_key(recipe, seed, parts)
+    if _cache.has(key):
+        return _cache[key]
+    var image := Image.create(GRID_SIZE, GRID_SIZE, false, Image.FORMAT_RGBA8)
+    image.fill(Color.TRANSPARENT)
+    var parameters: Dictionary = recipe.get("parameters", {})
+    var palette: Dictionary = parameters.get("palette", recipe.get("palette", {}))
+    var direction: String = recipe.get("direction", parameters.get("direction", "down"))
+    var layers: Array = recipe.get("layers", parameters.get("layers", []))
+    var layer_choices: Dictionary = parameters.get("layer_choices", {})
+    if not layer_choices.is_empty():
+        layers = []
+        for slot_index in range(LAYER_SLOTS.size()):
+            var slot: String = LAYER_SLOTS[slot_index]
+            var options: Array = layer_choices.get(slot, [])
+            if not options.is_empty():
+                layers.append({"slot": slot, "part_id": options[(seed + slot_index * 17) % options.size()], "offset": [0, 0]})
+    for slot in LAYER_SLOTS:
+        for layer in layers:
+            if layer.get("slot", "") != slot:
+                continue
+            var part_id: String = layer.get("part_id", "")
+            if not parts.has(part_id):
+                push_error("AIGame media recipe references missing part %s" % part_id)
+                continue
+            var source = parts[part_id]
+            var part_image: Image
+            if source is Texture2D:
+                part_image = source.get_image()
+            elif source is Image:
+                part_image = source
+            elif source is Dictionary:
+                part_image = _part_image(source, palette, seed, direction)
+            if part_image == null:
+                continue
+            var offset_value: Array = layer.get("offset", [0, 0])
+            var offset := Vector2i(int(offset_value[0]), int(offset_value[1]))
+            image.blend_rect(part_image, Rect2i(Vector2i.ZERO, part_image.get_size()), offset)
+    var texture := ImageTexture.create_from_image(image)
+    _cache[key] = texture
+    return texture
+
+func _part_image(part: Dictionary, palette: Dictionary, seed: int, direction: String) -> Image:
+    var image := Image.create(GRID_SIZE, GRID_SIZE, false, Image.FORMAT_RGBA8)
+    image.fill(Color.TRANSPARENT)
+    var pixels: Array = part.get("pixels", [])
+    var direction_pixels = part.get("direction_pixels")
+    if direction_pixels is Dictionary and direction_pixels.has(direction):
+        pixels = direction_pixels[direction]
+    for pixel in pixels:
+        if pixel.size() != 3:
+            continue
+        var color_name: String = str(pixel[2])
+        if color_name == "primary":
+            color_name = ["primary", "safe", "danger", "secondary"][seed % 4]
+        elif color_name == "secondary":
+            color_name = ["secondary", "light", "primary", "safe"][int(seed / 4) % 4]
+        elif color_name == "dark":
+            color_name = ["dark", "mid", "outline", "shadow"][int(seed / 16) % 4]
+        var color_value: String = palette.get(color_name, "#00000000")
+        var x := int(pixel[0])
+        if direction == "left" and bool(part.get("mirror_safe", false)):
+            x = GRID_SIZE - 1 - x
+        image.set_pixel(x, int(pixel[1]), Color(color_value))
+    return image
+
+func clear_cache() -> void:
+    _cache.clear()
+
+func cache_size() -> int:
+    return _cache.size()
+'''
+
+
 def _json(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -74,6 +190,8 @@ def create_game(
         ".aigame/automation.json",
         ".aigame/workflow.lock.json",
         ".aigame/state/concept.json",
+        ".aigame/state/assets.json",
+        ".aigame/media.toml",
         ".aigame/profiles/core-game-v1.json",
         ".aigame/profiles/roguelite-v1.json",
         "project.godot",
@@ -106,7 +224,7 @@ renderer = "gl_compatibility"
 primary_target = "windows-x86_64"
 serial_active_slice = true
 
-capability_packs = ["core-2d"]
+capability_packs = ["core-2d", "pixel-media-v1"]
 available_capability_packs = ["3d", "narrative", "localization", "mobile", "persistence", "networking"]
 allowed_commands = ["python", "git", "gh", "godot"]
 
@@ -175,6 +293,48 @@ activation = "requires a workflow upgrade, capability detection, tests, and huma
             "history": [],
         },
     )
+    _json(
+        root / ".aigame" / "state" / "assets.json",
+        {
+            "schema_version": "1.0",
+            "revision": 1,
+            "status": "unplanned",
+            "asset_plan_id": None,
+            "style_pack_id": None,
+            "style_approval_id": None,
+            "active_batch": None,
+            "history": [],
+        },
+    )
+    _text(
+        root / ".aigame" / "media.toml",
+        '''schema_version = "1.0"
+revision = 1
+grid_size = 16
+perspective = "top_down"
+directions = ["down", "left", "right", "up"]
+runtime_generation = "build_and_runtime"
+image_format = "png"
+audio_sample_rate = 48000
+pillow_version = "12.3.0"
+numpy_version = "2.4.6"
+sprite_batch_budget_seconds = 10.0
+sound_batch_budget_seconds = 15.0
+runtime_compose_budget_ms = 50.0
+cached_lookup_budget_ms = 1.0
+tile_atlas_budget_seconds = 1.0
+''',
+    )
+    _text(
+        root / ".aigame" / "capability-packs" / "pixel-media-v1.toml",
+        '''schema_version = "1.0"
+id = "pixel-media-v1"
+status = "implemented"
+implemented = true
+summary = "Deterministic 16x16 modular sprites, animations, tile sets, particles, UI, sound effects, ambience, and adaptive loops"
+activation = "aigame assets plan --apply --json"
+''',
+    )
     _text(
         root / "AGENTS.md",
         """# Agent entrypoint
@@ -187,6 +347,8 @@ In `human_gated` mode stop for direction, product identity, and blueprint approv
 `ai_staging` mode make those decisions, retain the generated agent approvals, and continue. At
 `commit_blueprint_inputs`, commit the canonical concept records before running concept finalization.
 Do not write implementation code until concept state is `finalized`.
+After concept finalization, run `aigame assets plan --apply --json` and complete the asset workflow
+before implementing work that depends on final media.
 Never push directly to `main`, approve your own independent review, or publish a release.
 Before changing files, claim exactly one work item with `aigame claim WI-#### --apply`.
 Use `aigame context WI-#### --json`, implement only that packet, run `aigame validate WI-####`,
@@ -402,6 +564,10 @@ Human-gated projects are merged by the owner. In AI-staging projects, `aigame st
         root / "LICENSES" / "workflow-Apache-2.0.txt",
         "The embedded AI Game Workflow tooling is licensed under Apache License 2.0.\nSee https://www.apache.org/licenses/LICENSE-2.0",
     )
+    _text(
+        root / "LICENSES" / "core-pixel-media-CC0-1.0.txt",
+        "The original core-topdown-v1 procedural coordinates and their unmodified deterministic outputs are dedicated under CC0 1.0.\nSee https://creativecommons.org/publicdomain/zero/1.0/\nOutputs composed with project-supplied parts retain the license recorded in asset-manifest.json.",
+    )
     _text(root / "docs" / "game_brief.md", f"# {name}\n\nStatus: concept blueprint required.\n")
     _text(root / "docs" / "game_design.md", "# Game design\n\nDefine the player fantasy, pillars, and core loop.")
     _text(root / "docs" / "technical_design.md", "# Technical design\n\nGodot 4, GDScript, offline 2D baseline.")
@@ -456,6 +622,14 @@ Human-gated projects are merged by the owner. In AI-staging projects, `aigame st
         "# Concept records\n\nJSON records in this directory are canonical. Use `aigame concept` commands to create or revise them.",
     )
     _text(
+        root / "work" / "assets" / "README.md",
+        "# Asset records\n\nCanonical asset plans, specifications, style packs, parts, recipes, animation sets, tile sets, particles, and sounds live here.",
+    )
+    _text(
+        root / "docs" / "assets" / "README.md",
+        "# Generated asset documentation\n\nRendered from canonical `work/assets/` records.",
+    )
+    _text(
         root / ".aigame" / "agent-skills" / "build-game-concept" / "SKILL.md",
         """---
 name: build-game-concept
@@ -474,6 +648,47 @@ the exact approval comment, then stop for the authenticated repository owner to 
 must not post that comment. Independent review remains mandatory.
 Never bypass production, release, rollback, secrets, paid services, or destructive external gates.
 """,
+    )
+    _text(
+        root / ".aigame" / "agent-skills" / "generate-game-assets" / "SKILL.md",
+        '''---
+name: generate-game-assets
+description: Plan, generate, validate, and integrate every deterministic visual and audio asset required by an approved aigame blueprint.
+---
+
+# Generate Game Assets
+
+Read `AGENTS.md`, `.aigame/media.toml`, `.aigame/automation.json`, and
+`.aigame/state/assets.json`. Run `aigame doctor --project . --json`, then `aigame assets next
+--project . --json` and perform only the returned operation. Preview every mutation before
+`--apply`; validate and query `next` again after every applied step. Human-gated mode stops at the
+representative style approval. AI-staging mode lets the CLI record a bound agent approval. Resume
+from cache receipts and canonical state rather than restarting. Treat source packs and adapter
+output as untrusted until license, provenance, checksum, palette, path, and Godot runtime validation
+pass. Never call a paid provider, install dependencies, download models, or bypass independent
+review, staging-owner approval, production, release, rollback, secrets, or destructive gates.
+''',
+    )
+    source_pack = {
+        "schema_version": "1.0",
+        "id": "core-topdown-v1",
+        "name": "Core Top-down 16x16",
+        "license": "CC0-1.0",
+        "grid_size": 16,
+        "perspective": "top_down",
+        "directions": ["down", "left", "right", "up"],
+        "body_families": ["humanoid", "compact_enemy"],
+        "parts": ["shadow", "body", "legs", "head", "front_weapon", "front_effect"],
+        "provenance": "Original procedural coordinates; no LPC or third-party artwork is bundled.",
+    }
+    source_pack["sha256"] = fingerprint(source_pack)
+    _json(
+        root / "assets" / "source" / "packs" / "core-topdown-v1" / "pack.json",
+        source_pack,
+    )
+    _text(
+        root / "addons" / "aigame_media" / "runtime_composer.gd",
+        runtime_composer_source(),
     )
     _text(
         root / "work" / "decisions" / "README.md",
@@ -529,6 +744,11 @@ window/size/window_height_override=720
 [rendering]
 renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
+textures/canvas_textures/default_texture_filter=0
+textures/default_filters/use_nearest_mipmap_filter=false
+
+[editor]
+import/use_multiple_threads=false
 
 [input]
 move_left={{"deadzone":0.5,"events":[Object(InputEventKey,"physical_keycode":65)]}}

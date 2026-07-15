@@ -36,8 +36,9 @@ jobs:
           set -euo pipefail
           if [[ -f pyproject.toml ]]; then
             python -m pip install -e '.[test]'
+            python -m pip install -e '.[media]'
           else
-            python -m pip install 'jsonschema>=4.26,<5'
+            python -m pip install 'jsonschema>=4.26,<5' 'Pillow==12.3.0' 'numpy==2.4.6'
             echo "PYTHONPATH=$GITHUB_WORKSPACE/$PROJECT_PATH/.aigame/vendor" >> "$GITHUB_ENV"
           fi
       - name: Run contract suite

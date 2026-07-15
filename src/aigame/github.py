@@ -155,11 +155,22 @@ class GhClient:
 def build_sync_plan(root: Path | str) -> dict[str, Any]:
     project = Path(root).resolve()
     issues = []
+    media_specs = []
+    for media_path in sorted((project / "work" / "assets" / "specs").glob("ASP-*.json")):
+        media_specs.append(json.loads(media_path.read_text(encoding="utf-8")))
     for path in sorted((project / "work" / "items").glob("WI-*.json")):
         item = json.loads(path.read_text(encoding="utf-8"))
-        checksum = fingerprint(item)
-        marker = f"<!-- aigame:{item['id']}:{checksum} -->"
         concept_refs = item.get("concept_refs", [])
+        asset_refs = sorted(
+            spec["id"]
+            for spec in media_specs
+            if any(
+                str(source_ref).split(".", 1)[0] in concept_refs
+                for source_ref in spec.get("source_refs", [])
+            )
+        )
+        checksum = fingerprint({"work_item": item, "asset_refs": asset_refs})
+        marker = f"<!-- aigame:{item['id']}:{checksum} -->"
         body = "\n".join(
             [
                 marker,
@@ -167,6 +178,7 @@ def build_sync_plan(root: Path | str) -> dict[str, Any]:
                 f"Milestone: `{item.get('milestone', 'unassigned')}`",
                 f"Risk: `{item.get('risk', 0)}`",
                 f"Concept: {', '.join(f'`{value}`' for value in concept_refs)}" if concept_refs else "Concept: `not linked`",
+                f"Media: {', '.join(f'`{value}`' for value in asset_refs)}" if asset_refs else "Media: `not linked`",
                 "",
                 "This issue mirrors canonical repository data. Edit intent through a pull request.",
             ]

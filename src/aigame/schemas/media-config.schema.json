@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MediaConfig",
+  "type": "object",
+  "required": ["schema_version", "revision", "grid_size", "perspective", "directions", "runtime_generation", "image_format", "audio_sample_rate", "pillow_version", "numpy_version", "sprite_batch_budget_seconds", "sound_batch_budget_seconds", "runtime_compose_budget_ms", "cached_lookup_budget_ms", "tile_atlas_budget_seconds"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "revision": {"type": "integer", "minimum": 1},
+    "grid_size": {"const": 16},
+    "perspective": {"const": "top_down"},
+    "directions": {"const": ["down", "left", "right", "up"]},
+    "runtime_generation": {"enum": ["build_and_runtime", "build_only"]},
+    "image_format": {"const": "png"},
+    "audio_sample_rate": {"const": 48000},
+    "pillow_version": {"const": "12.3.0"},
+    "numpy_version": {"const": "2.4.6"},
+    "sprite_batch_budget_seconds": {"type": "number", "exclusiveMinimum": 0},
+    "sound_batch_budget_seconds": {"type": "number", "exclusiveMinimum": 0},
+    "runtime_compose_budget_ms": {"type": "number", "exclusiveMinimum": 0},
+    "cached_lookup_budget_ms": {"type": "number", "exclusiveMinimum": 0},
+    "tile_atlas_budget_seconds": {"type": "number", "exclusiveMinimum": 0}
+  },
+  "additionalProperties": true
+}

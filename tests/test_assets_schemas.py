@@ -47,10 +47,27 @@ class AssetAdapterTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "provenance"):
                 generate_asset(brief, adapter=[sys.executable, str(script)])
 
+    def test_failed_optional_provider_falls_back_without_changing_scope(self) -> None:
+        brief = {
+            "schema_version": "1.0",
+            "id": "AST-0042",
+            "kind": "image",
+            "purpose": "Approved source-part fallback",
+            "runtime_path": "assets/source/fallback.png",
+        }
+        result = generate_asset(
+            brief,
+            adapter=[sys.executable, "-c", "import sys; sys.exit(7)"],
+        )
+        self.assertEqual("placeholder", result["status"])
+        self.assertEqual(brief["id"], result["asset_id"])
+        self.assertEqual(brief["runtime_path"], result["runtime_path"])
+        self.assertIn("adapter_failure", result["provenance"])
+
     def test_lfs_is_planned_only_for_generated_game_repositories(self) -> None:
         plan = build_lfs_plan(Path("game"))
-        self.assertIn("*.psd", plan["patterns"])
-        self.assertIn("*.wav", plan["patterns"])
+        self.assertIn("assets/source/**/*.psd", plan["patterns"])
+        self.assertIn("assets/source/**/*.wav", plan["patterns"])
         self.assertEqual(plan["status"], "dry_run")
 
 

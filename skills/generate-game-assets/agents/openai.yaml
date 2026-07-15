@@ -1,0 +1,4 @@
+interface:
+  display_name: "Generate Game Assets"
+  short_description: "Build complete deterministic pixel game media"
+  default_prompt: "Use $generate-game-assets to plan, generate, validate, and integrate every visual and audio asset required by this game blueprint."

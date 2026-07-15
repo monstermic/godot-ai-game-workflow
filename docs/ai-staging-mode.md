@@ -20,11 +20,11 @@ The canonical record is `.aigame/automation.json`. Its checksum-protected policy
 
 ## Agent authority
 
-The agent chooses one of the three pitches, establishes product identity, completes and approves the blueprint, makes implementation choices within approved scope, runs allowlisted local tools, and prepares commits and pull requests. Concept approvals are durable `APR-` records with `approval_kind: agent` and `automation_mode: ai_staging`.
+The agent chooses one of the three pitches, establishes product identity, completes and approves the blueprint, approves representative generated media, makes implementation choices within approved scope, runs allowlisted local tools, and prepares commits and pull requests. Concept and media approvals are durable `APR-` records with `approval_kind: agent` and `automation_mode: ai_staging`.
 
 When concept generation returns `commit_blueprint_inputs`, the agent commits the canonical records, runs `aigame concept next --json` to bind the refreshed request to that commit, and then runs `aigame concept finalize --apply --json`. This is an automated agent step, not a human creative gate.
 
-The agent must still produce complete mechanics, named launch content, a beginning-to-ending journey, evidence, and playtest hypotheses. Automatic approval is accountability metadata, not permission to omit contract fields or claim subjective fun.
+The agent must still produce complete mechanics, named launch content, a beginning-to-ending journey, exhaustive asset coverage, deterministic recipes, valid Godot resources, evidence, and playtest hypotheses. Automatic approval is accountability metadata, not permission to omit contract fields, call providers, or claim subjective fun.
 
 ## Staging integration
 

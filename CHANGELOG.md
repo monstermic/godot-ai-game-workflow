@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.0 — 2026-07-15
+
+- Added the `pixel-media-v1` capability pack and exhaustive blueprint-to-asset planning contracts.
+- Added deterministic indexed sprite/animation composition, complete terrain-mask atlases, seeded connected stage layouts, particle scenes, UI images, 48 kHz procedural audio, and Godot resources.
+- Added resumable content-addressed generation, representative style approval, AI-staging approval, validation, benchmarks, integration registry, CLI/MCP operations, and the portable `generate-game-assets` skill.
+- Pinned the optional media runtime to Pillow 12.3.0 and NumPy 2.4.6; paid providers and model downloads remain separately protected.
+
 ## 1.2.0 — 2026-07-14
 
 - Added explicit `human_gated` and opt-in `ai_staging` automation policies.

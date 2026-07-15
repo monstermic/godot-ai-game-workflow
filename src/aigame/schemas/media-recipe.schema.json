@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MediaRecipe",
+  "type": "object",
+  "required": ["schema_version", "id", "revision", "status", "created_at", "updated_at", "input_fingerprint", "kind", "asset_spec_id", "seed", "source_part_ids", "parameters", "outputs"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "id": {"type": "string", "pattern": "^RCP-[0-9]{4}$"},
+    "revision": {"type": "integer", "minimum": 1},
+    "status": {"enum": ["planned", "approved", "generated", "validated", "rework"]},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"},
+    "input_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "kind": {"enum": ["sprite", "animation", "tileset", "particle", "ui", "sound", "ambience", "music"]},
+    "asset_spec_id": {"type": "string", "pattern": "^ASP-[0-9]{4}$"},
+    "seed": {"type": "integer"},
+    "source_part_ids": {"type": "array", "items": {"type": "string", "pattern": "^PRT-[0-9]{4}$"}, "uniqueItems": true},
+    "parameters": {"type": "object"},
+    "outputs": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "uniqueItems": true}
+  },
+  "additionalProperties": true
+}

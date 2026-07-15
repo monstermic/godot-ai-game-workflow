@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AssetPlan",
+  "type": "object",
+  "required": ["schema_version", "id", "revision", "status", "created_at", "updated_at", "input_fingerprint", "blueprint_fingerprint", "style_pack_id", "asset_spec_ids", "coverage"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "id": {"type": "string", "pattern": "^APL-[0-9]{4}$"},
+    "revision": {"type": "integer", "minimum": 1},
+    "status": {"enum": ["inventoried", "ready", "generating", "validating", "integrated", "blocked", "rework"]},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"},
+    "input_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "blueprint_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "style_pack_id": {"type": "string", "pattern": "^STY-[0-9]{4}$"},
+    "asset_spec_ids": {"type": "array", "items": {"type": "string", "pattern": "^ASP-[0-9]{4}$"}, "uniqueItems": true},
+    "coverage": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["source_ref", "asset_spec_ids"],
+        "properties": {
+          "source_ref": {"type": "string"},
+          "asset_spec_ids": {
+            "type": "array",
+            "items": {"type": "string", "pattern": "^ASP-[0-9]{4}$"},
+            "minItems": 1,
+            "uniqueItems": true
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": true
+}

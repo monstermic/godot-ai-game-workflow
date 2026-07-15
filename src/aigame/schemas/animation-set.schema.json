@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AnimationSet",
+  "type": "object",
+  "required": ["schema_version", "id", "revision", "status", "created_at", "updated_at", "input_fingerprint", "body_family", "directions", "clips", "anchors"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "id": {"type": "string", "pattern": "^ANI-[0-9]{4}$"},
+    "revision": {"type": "integer", "minimum": 1},
+    "status": {"enum": ["planned", "approved", "generated", "validated", "rework"]},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"},
+    "input_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "body_family": {"type": "string", "minLength": 1},
+    "directions": {"const": ["down", "left", "right", "up"]},
+    "clips": {"type": "array", "items": {"type": "object", "required": ["name", "frames", "fps", "loop", "events"], "properties": {"name": {"type": "string"}, "frames": {"type": "integer", "minimum": 1}, "fps": {"type": "number", "exclusiveMinimum": 0}, "loop": {"type": "boolean"}, "events": {"type": "array"}}}, "minItems": 1},
+    "anchors": {"type": "array", "items": {"enum": ["origin", "feet", "head", "main_hand", "off_hand", "muzzle", "effect"]}, "uniqueItems": true}
+  },
+  "additionalProperties": true
+}

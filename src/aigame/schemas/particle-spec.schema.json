@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ParticleSpec",
+  "type": "object",
+  "required": ["schema_version", "id", "revision", "status", "created_at", "updated_at", "input_fingerprint", "name", "texture", "seed", "amount", "lifetime", "fixed_fps", "motion", "colors", "cpu_fallback", "budget"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "id": {"type": "string", "pattern": "^PFX-[0-9]{4}$"},
+    "revision": {"type": "integer", "minimum": 1},
+    "status": {"enum": ["planned", "approved", "generated", "validated", "rework"]},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"},
+    "input_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "name": {"type": "string", "minLength": 1},
+    "texture": {"type": "string", "minLength": 1},
+    "seed": {"type": "integer"},
+    "amount": {"type": "integer", "minimum": 1},
+    "lifetime": {"type": "number", "exclusiveMinimum": 0},
+    "fixed_fps": {"type": "integer", "minimum": 1},
+    "motion": {"type": "object"},
+    "colors": {"type": "array", "items": {"type": "string", "pattern": "^#[0-9a-fA-F]{8}$"}, "minItems": 1},
+    "cpu_fallback": {"type": "boolean"},
+    "budget": {"type": "object"}
+  },
+  "additionalProperties": true
+}
