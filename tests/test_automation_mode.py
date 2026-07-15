@@ -195,6 +195,12 @@ class AutomationModeTests(unittest.TestCase):
 
     def test_ai_mode_commits_blueprint_inputs_before_final_agent_approval(self) -> None:
         subprocess.run(["git", "init", "-b", "main"], cwd=self.root, check=True, capture_output=True)
+        # This repository contains enough generated records to trigger Git's
+        # detached automatic maintenance on Linux. Keep the temporary test
+        # repository synchronous so tearDown cannot race a background Git
+        # process that is still writing under .git.
+        subprocess.run(["git", "config", "maintenance.auto", "false"], cwd=self.root, check=True)
+        subprocess.run(["git", "config", "gc.auto", "0"], cwd=self.root, check=True)
         subprocess.run(["git", "config", "user.name", "Test Agent"], cwd=self.root, check=True)
         subprocess.run(["git", "config", "user.email", "agent@example.invalid"], cwd=self.root, check=True)
         set_automation_mode(
