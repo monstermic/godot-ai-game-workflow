@@ -643,6 +643,27 @@ class MediaFactoryTests(unittest.TestCase):
         with self.assertRaisesRegex(WorkflowError, "anchor alignment"):
             compose_recipe(self.root, recipe["id"], seed=1)
 
+    def test_directional_pixels_must_be_declared_in_occupancy_mask(self) -> None:
+        plan_assets(self.root, apply=True)
+        recipe_path = next(
+            path
+            for path in (self.root / "work/assets/recipes").glob("RCP-*.json")
+            if "PRT-0005" in json.loads(path.read_text(encoding="utf-8"))["source_part_ids"]
+        )
+        recipe = json.loads(recipe_path.read_text(encoding="utf-8"))
+        part_path = self.root / "work/assets/parts/PRT-0005.json"
+        part = json.loads(part_path.read_text(encoding="utf-8"))
+        part["direction_pixels"]["down"].append([0, 0, "safe"])
+        part.pop("input_fingerprint")
+        part["input_fingerprint"] = fingerprint(part)
+        _write_json(part_path, part)
+        recipe["parameters"]["source_part_hashes"]["PRT-0005"] = part["input_fingerprint"]
+        recipe.pop("input_fingerprint")
+        recipe["input_fingerprint"] = fingerprint(recipe)
+        _write_json(recipe_path, recipe)
+        with self.assertRaisesRegex(WorkflowError, "occupancy mask"):
+            compose_recipe(self.root, recipe["id"], seed=1)
+
     def test_sound_randomizer_is_weighted_no_repeat(self) -> None:
         set_automation_mode(self.root, "ai_staging", confirmation=AI_MODE_CONFIRMATION, apply=True)
         plan_assets(self.root, apply=True)

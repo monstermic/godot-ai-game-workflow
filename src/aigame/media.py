@@ -590,6 +590,18 @@ def _part_records(style: dict[str, Any]) -> list[dict[str, Any]]:
                 "left": [[max(0, 15 - x), y, color] for x, y, color in pixels],
                 "right": pixels,
             }
+        occupancy_pixels = list(pixels)
+        if direction_pixels:
+            occupancy_pixels = [
+                [x, y]
+                for x, y in sorted(
+                    {
+                        (int(pixel[0]), int(pixel[1]))
+                        for directional_pixels in direction_pixels.values()
+                        for pixel in directional_pixels
+                    }
+                )
+            ]
         records.append(
             _record(
                 {
@@ -605,7 +617,7 @@ def _part_records(style: dict[str, Any]) -> list[dict[str, Any]]:
                         "muzzle": [14, 7],
                         "effect": [12, 6],
                     },
-                    "occupancy_mask": pixels,
+                    "occupancy_mask": occupancy_pixels,
                     "occlusion_mask": [],
                     "compatible_body_families": ["humanoid", "compact_enemy"],
                     "compatible_animations": [*[clip["name"] for clip in BASELINE_CLIPS], "*"],
@@ -1755,18 +1767,22 @@ def _recipe_inputs(
             occupancy = {
                 (int(point[0]), int(point[1])) for point in part.get("occupancy_mask", [])
             }
-            pixels = {
-                (int(point[0]), int(point[1])) for point in part.get("pixels", [])
+            painted_pixels = list(part.get("pixels", []))
+            directional = part.get("direction_pixels")
+            if isinstance(directional, dict):
+                for direction in DIRECTIONS:
+                    painted_pixels.extend(directional.get(direction, []))
+            painted_coordinates = {
+                (int(point[0]), int(point[1])) for point in painted_pixels
             }
-            if not pixels.issubset(occupancy):
+            if not painted_coordinates.issubset(occupancy):
                 raise WorkflowError(
                     f"{recipe['id']}: source part {part_id} occupancy mask omits painted pixels"
                 )
             if not part.get("mirror_safe"):
-                directional = part.get("direction_pixels")
                 if not isinstance(directional, dict) or set(directional) != set(DIRECTIONS):
                     raise WorkflowError(f"{recipe['id']}: asymmetric part {part_id} requires all four directions")
-            for pixel in part.get("pixels", []):
+            for pixel in painted_pixels:
                 if len(pixel) != 3 or str(pixel[2]) not in compile_style.get("palette", {}):
                     raise WorkflowError(f"{recipe['id']}: source part {part_id} uses an unknown semantic color")
             selected_parts.append(part)
