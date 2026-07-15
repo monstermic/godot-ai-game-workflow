@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "PartSpec",
   "type": "object",
-  "required": ["schema_version", "id", "revision", "status", "created_at", "updated_at", "input_fingerprint", "name", "slot", "pixels", "anchors", "compatible_body_families", "compatible_animations", "mirror_safe", "license", "sha256"],
+  "required": ["schema_version", "id", "revision", "status", "created_at", "updated_at", "input_fingerprint", "name", "slot", "pixels", "anchors", "occupancy_mask", "occlusion_mask", "compatible_body_families", "compatible_animations", "compatible_directions", "mirror_safe", "license", "sha256", "provenance"],
   "properties": {
     "schema_version": {"const": "1.0"},
     "id": {"type": "string", "pattern": "^PRT-[0-9]{4}$"},
@@ -14,12 +14,48 @@
     "name": {"type": "string", "minLength": 1},
     "slot": {"type": "string", "minLength": 1},
     "pixels": {"type": "array", "items": {"type": "array", "prefixItems": [{"type": "integer", "minimum": 0, "maximum": 15}, {"type": "integer", "minimum": 0, "maximum": 15}, {"type": "string", "minLength": 1}], "items": false}, "minItems": 1},
-    "anchors": {"type": "object"},
+    "anchors": {
+      "type": "object",
+      "required": ["origin", "feet", "head", "main_hand", "off_hand", "muzzle", "effect"],
+      "properties": {
+        "origin": {"$ref": "#/$defs/point"},
+        "feet": {"$ref": "#/$defs/point"},
+        "head": {"$ref": "#/$defs/point"},
+        "main_hand": {"$ref": "#/$defs/point"},
+        "off_hand": {"$ref": "#/$defs/point"},
+        "muzzle": {"$ref": "#/$defs/point"},
+        "effect": {"$ref": "#/$defs/point"}
+      },
+      "additionalProperties": false
+    },
+    "occupancy_mask": {"type": "array", "items": {"$ref": "#/$defs/maskPoint"}, "minItems": 1},
+    "occlusion_mask": {"type": "array", "items": {"$ref": "#/$defs/maskPoint"}},
     "compatible_body_families": {"type": "array", "items": {"type": "string"}, "minItems": 1},
     "compatible_animations": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "compatible_directions": {"type": "array", "items": {"enum": ["down", "left", "right", "up"]}, "minItems": 1, "uniqueItems": true},
     "mirror_safe": {"type": "boolean"},
     "license": {"enum": ["original", "CC0-1.0", "CC-BY-4.0", "Apache-2.0", "proprietary", "commercial"]},
-    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "provenance": {"type": "object", "minProperties": 1}
+  },
+  "$defs": {
+    "point": {
+      "type": "array",
+      "prefixItems": [
+        {"type": "integer", "minimum": 0, "maximum": 15},
+        {"type": "integer", "minimum": 0, "maximum": 15}
+      ],
+      "items": false
+    },
+    "maskPoint": {
+      "type": "array",
+      "prefixItems": [
+        {"type": "integer", "minimum": 0, "maximum": 15},
+        {"type": "integer", "minimum": 0, "maximum": 15}
+      ],
+      "minItems": 2,
+      "maxItems": 3
+    }
   },
   "additionalProperties": true
 }

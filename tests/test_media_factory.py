@@ -303,6 +303,15 @@ class MediaFactoryTests(unittest.TestCase):
         media_validator = Draft202012Validator(media_schema)
         self.assertEqual([], list(media_validator.iter_errors(media_config)))
         self.assertTrue(list(media_validator.iter_errors({**media_config, "schema_version": "999.0"})))
+        part_schema = json.loads((schema_root / "part-spec.schema.json").read_text(encoding="utf-8"))
+        part_record = json.loads((self.root / "work/assets/parts/PRT-0001.json").read_text(encoding="utf-8"))
+        part_validator = Draft202012Validator(part_schema)
+        for field in ("occupancy_mask", "occlusion_mask", "compatible_directions", "provenance"):
+            invalid = dict(part_record)
+            invalid.pop(field)
+            self.assertTrue(list(part_validator.iter_errors(invalid)), field)
+        invalid_anchors = {**part_record, "anchors": {"origin": [8, 8]}}
+        self.assertTrue(list(part_validator.iter_errors(invalid_anchors)))
 
     def test_assets_cli_exposes_dry_run_safe_protocol(self) -> None:
         code, next_task = self._cli(["assets", "next", "--project", str(self.root), "--json"])
@@ -520,6 +529,133 @@ class MediaFactoryTests(unittest.TestCase):
         self.assertEqual("complete", next_asset_task(self.root)["operation"])
         self.assertTrue((self.root / "assets/generated/media-registry.json").is_file())
 
+    def test_generation_preserves_external_asset_ids_and_manual_asset_paths(self) -> None:
+        set_automation_mode(self.root, "ai_staging", confirmation=AI_MODE_CONFIRMATION, apply=True)
+        plan_assets(self.root, apply=True)
+        sample_assets(self.root, apply=True)
+        manual_path = self.root / "assets/manual.png"
+        manual_path.write_bytes(b"owner-managed-asset")
+        external = _record(
+            {
+                "id": "AST-0001",
+                "status": "final",
+                "kind": "image",
+                "runtime_path": "assets/manual.png",
+                "license": "proprietary",
+                "provenance": {"generated": False, "owner": "Game Owner"},
+                "sha256": hashlib.sha256(manual_path.read_bytes()).hexdigest(),
+            }
+        )
+        _write_json(
+            self.root / "assets/asset-manifest.json",
+            {"schema_version": "1.0", "revision": 1, "assets": [external]},
+        )
+        generate_assets(self.root, all_assets=True, jobs=2, apply=True)
+        manifest = json.loads((self.root / "assets/asset-manifest.json").read_text(encoding="utf-8"))
+        by_id = {asset["id"]: asset for asset in manifest["assets"]}
+        self.assertEqual(external, by_id["AST-0001"])
+        self.assertEqual(len(manifest["assets"]), len(by_id))
+        self.assertEqual([], validate_assets(self.root)["errors"])
+
+    def test_cache_rejects_stale_recipe_and_part_fingerprints(self) -> None:
+        set_automation_mode(self.root, "ai_staging", confirmation=AI_MODE_CONFIRMATION, apply=True)
+        plan_assets(self.root, apply=True)
+        sample_assets(self.root, apply=True)
+        generate_assets(self.root, all_assets=True, jobs=2, apply=True)
+        recipe_path = next((self.root / "work/assets/recipes").glob("RCP-*.json"))
+        recipe = json.loads(recipe_path.read_text(encoding="utf-8"))
+        recipe["seed"] += 1
+        _write_json(recipe_path, recipe)
+        with self.assertRaisesRegex(WorkflowError, "fingerprint"):
+            generate_assets(self.root, all_assets=True, jobs=2, apply=True)
+
+        plan_assets(self.root, apply=True)
+        sample_assets(self.root, apply=True)
+        generate_assets(self.root, all_assets=True, jobs=2, apply=True)
+        part_path = self.root / "work/assets/parts/PRT-0002.json"
+        part = json.loads(part_path.read_text(encoding="utf-8"))
+        part["pixels"].append([8, 8, "secondary"])
+        _write_json(part_path, part)
+        with self.assertRaisesRegex(WorkflowError, "fingerprint"):
+            generate_assets(self.root, all_assets=True, jobs=2, apply=True)
+
+    def test_content_animation_requirement_gets_its_own_exact_clip(self) -> None:
+        content_path = self.root / "work/concept/content/CNT-0002.json"
+        content = json.loads(content_path.read_text(encoding="utf-8"))
+        content["required_assets"].append("boss phase transformation animation")
+        content.pop("input_fingerprint")
+        content["input_fingerprint"] = fingerprint(content)
+        _write_json(content_path, content)
+        plan_assets(self.root, apply=True)
+        plan = json.loads((self.root / "work/assets/APL-0001.json").read_text(encoding="utf-8"))
+        asset_id = next(
+            row["asset_spec_ids"][0]
+            for row in plan["coverage"]
+            if row["source_ref"] == "CNT-0002.required_assets[3]"
+        )
+        recipe = next(
+            json.loads(path.read_text(encoding="utf-8"))
+            for path in (self.root / "work/assets/recipes").glob("RCP-*.json")
+            if json.loads(path.read_text(encoding="utf-8"))["asset_spec_id"] == asset_id
+        )
+        animation = json.loads(
+            (self.root / "work/assets/animations" / f"{recipe['parameters']['animation_set_id']}.json").read_text()
+        )
+        self.assertIn("boss_phase_transformation", {clip["name"] for clip in animation["clips"]})
+
+    def test_recipe_rejects_incompatible_part_family_and_anchor_alignment(self) -> None:
+        plan_assets(self.root, apply=True)
+        recipe_path = next(
+            path
+            for path in (self.root / "work/assets/recipes").glob("RCP-*.json")
+            if "PRT-0002" in json.loads(path.read_text(encoding="utf-8"))["source_part_ids"]
+        )
+        recipe = json.loads(recipe_path.read_text(encoding="utf-8"))
+        part_path = self.root / "work/assets/parts/PRT-0002.json"
+        part = json.loads(part_path.read_text(encoding="utf-8"))
+        part["compatible_body_families"] = ["alien"]
+        part.pop("input_fingerprint")
+        part["input_fingerprint"] = fingerprint(part)
+        _write_json(part_path, part)
+        recipe["parameters"]["source_part_hashes"]["PRT-0002"] = part["input_fingerprint"]
+        recipe.pop("input_fingerprint")
+        recipe["input_fingerprint"] = fingerprint(recipe)
+        _write_json(recipe_path, recipe)
+        with self.assertRaisesRegex(WorkflowError, "body family"):
+            compose_recipe(self.root, recipe["id"], seed=1)
+
+        plan_assets(self.root, apply=True)
+        recipe_path = next(
+            path
+            for path in (self.root / "work/assets/recipes").glob("RCP-*.json")
+            if "PRT-0002" in json.loads(path.read_text(encoding="utf-8"))["source_part_ids"]
+        )
+        recipe = json.loads(recipe_path.read_text(encoding="utf-8"))
+        part = json.loads(part_path.read_text(encoding="utf-8"))
+        part["anchors"]["feet"] = [7, 13]
+        part.pop("input_fingerprint")
+        part["input_fingerprint"] = fingerprint(part)
+        _write_json(part_path, part)
+        recipe["parameters"]["source_part_hashes"]["PRT-0002"] = part["input_fingerprint"]
+        recipe.pop("input_fingerprint")
+        recipe["input_fingerprint"] = fingerprint(recipe)
+        _write_json(recipe_path, recipe)
+        with self.assertRaisesRegex(WorkflowError, "anchor alignment"):
+            compose_recipe(self.root, recipe["id"], seed=1)
+
+    def test_sound_randomizer_is_weighted_no_repeat(self) -> None:
+        set_automation_mode(self.root, "ai_staging", confirmation=AI_MODE_CONFIRMATION, apply=True)
+        plan_assets(self.root, apply=True)
+        sample_assets(self.root, apply=True)
+        generate_assets(self.root, all_assets=True, jobs=2, apply=True)
+        randomizer = next(
+            path
+            for path in (self.root / "assets/generated/audio/sfx").glob("*.tres")
+        )
+        text = randomizer.read_text(encoding="utf-8")
+        self.assertIn("playback_mode = 0", text)
+        self.assertNotIn("playback_mode = 1", text)
+
     def test_seeded_layouts_are_connected_and_repeatable(self) -> None:
         plan_assets(self.root, apply=True)
         tile_set = json.loads(next((self.root / "work/assets/tiles").glob("TIL-*.json")).read_text())
@@ -592,6 +728,17 @@ class MediaFactoryTests(unittest.TestCase):
         tile_set["tiles"] = tile_set["tiles"][:-1]
         with self.assertRaisesRegex(WorkflowError, "neighbor masks"):
             generate_wfc_layout(width=17, height=13, seed=7, tile_set=tile_set)
+
+    def test_wfc_places_required_encounters_and_rejects_zero_weight_navigation(self) -> None:
+        plan_assets(self.root, apply=True)
+        tile_set = json.loads(next((self.root / "work/assets/tiles").glob("TIL-*.json")).read_text())
+        tile_set["stage_constraints"]["required_encounters"] = ["clockwork_boss"]
+        layout = generate_wfc_layout(width=17, height=13, seed=11, tile_set=tile_set)
+        self.assertIn("clockwork_boss", layout["required_encounters"])
+        navigation_tile = next(tile for tile in tile_set["tiles"] if tile["navigation"])
+        navigation_tile["weight"] = 0.0
+        with self.assertRaisesRegex(WorkflowError, "positive-weight navigable"):
+            generate_wfc_layout(width=17, height=13, seed=11, tile_set=tile_set)
 
     def test_recipe_hashes_are_stable_across_seeded_replays(self) -> None:
         plan_assets(self.root, apply=True)

@@ -264,6 +264,15 @@ def _safe_relative(value: str) -> Path:
     return candidate
 
 
+def _safe_asset_relative(value: str) -> Path:
+    candidate = Path(value.replace("\\", "/"))
+    if candidate.is_absolute() or ".." in candidate.parts or len(candidate.parts) < 2:
+        raise WorkflowError(f"Unsafe asset path: {value!r}")
+    if candidate.parts[0] != "assets":
+        raise WorkflowError(f"Runtime asset must be below assets/: {value!r}")
+    return candidate
+
+
 def _concept_records(project: Path, folder: str, pattern: str) -> list[dict[str, Any]]:
     return [_load_json(path) for path in sorted((project / "work" / "concept" / folder).glob(pattern))]
 
@@ -599,7 +608,7 @@ def _part_records(style: dict[str, Any]) -> list[dict[str, Any]]:
                     "occupancy_mask": pixels,
                     "occlusion_mask": [],
                     "compatible_body_families": ["humanoid", "compact_enemy"],
-                    "compatible_animations": [clip["name"] for clip in BASELINE_CLIPS],
+                    "compatible_animations": [*[clip["name"] for clip in BASELINE_CLIPS], "*"],
                     "compatible_directions": DIRECTIONS,
                     "mirror_safe": slot not in {"front_weapon", "front_effect"},
                     "direction_pixels": direction_pixels,
@@ -679,6 +688,27 @@ def _effective_output_license(parts: list[dict[str, Any]]) -> str:
     return "CC0-1.0"
 
 
+def _body_family_for_need(need: dict[str, Any]) -> str:
+    value = f"{need.get('source_ref', '')} {need.get('purpose', '')}".lower()
+    return "compact_enemy" if any(word in value for word in ("enemy", "boss", "sentinel")) else "humanoid"
+
+
+def _extra_animation_clip(need: dict[str, Any]) -> str | None:
+    source_ref = str(need.get("source_ref", ""))
+    if ".state." in source_ref:
+        return _slug(source_ref.split(".state.", 1)[1]).replace("-", "_")
+    if not source_ref.startswith("CNT-"):
+        return None
+    phrase = str(need.get("purpose", "")).split(":", 1)[-1].lower()
+    if "animation" not in phrase and "clip" not in phrase:
+        return None
+    phrase = re.sub(r"\b(complete|full|baseline|animation|animations|clip|clips|set)\b", " ", phrase)
+    phrase = re.sub(r"\s+", " ", phrase).strip()
+    if not phrase or phrase in {"character", "enemy", "boss", "sprite"}:
+        return None
+    return _slug(phrase).replace("-", "_")
+
+
 def _records_for_plan(
     needs: list[dict[str, Any]],
     blueprint_fingerprint: str,
@@ -709,20 +739,32 @@ def _records_for_plan(
         kind = str(need["kind"])
         variants = 3 if kind in {"sound", "music"} else 1
         outputs = _output_paths(kind, str(need["purpose"]), index, variants)
-        source_part_ids = [record["id"] for record in parts] if kind in {"sprite", "animation"} else []
+        body_family = _body_family_for_need(need)
+        compatible_parts = [
+            record
+            for record in parts
+            if body_family in record.get("compatible_body_families", [])
+        ]
+        source_part_ids = (
+            [record["id"] for record in compatible_parts]
+            if kind in {"sprite", "animation"}
+            else []
+        )
         parameters: dict[str, Any] = {
             "grid_size": 16,
             "palette_id": style["id"],
             "palette": style["palette"],
             "style_fingerprint": _style_generation_fingerprint(style),
+            "body_family": body_family,
+            "required_directions": DIRECTIONS,
             "purpose": need["purpose"],
             "output_license": "CC0-1.0",
         }
         if kind in {"sprite", "animation"}:
             layer_choices = {
-                slot: [part["id"] for part in parts if part.get("slot") == slot]
+                slot: [part["id"] for part in compatible_parts if part.get("slot") == slot]
                 for slot in LAYER_SLOTS
-                if any(part.get("slot") == slot for part in parts)
+                if any(part.get("slot") == slot for part in compatible_parts)
             }
             parameters["layer_choices"] = layer_choices
             parameters["layers"] = [
@@ -730,31 +772,31 @@ def _records_for_plan(
                 for slot, choices in layer_choices.items()
             ]
             parameters["source_part_hashes"] = {
-                part["id"]: part["input_fingerprint"] for part in parts
+                part["id"]: part["input_fingerprint"] for part in compatible_parts
             }
             parameters["source_part_licenses"] = {
-                part["id"]: part["license"] for part in parts
+                part["id"]: part["license"] for part in compatible_parts
             }
-            parameters["output_license"] = _effective_output_license(parts)
+            parameters["output_license"] = _effective_output_license(compatible_parts)
         if kind == "animation":
             animation_index += 1
             animation_id = f"ANI-{animation_index:04d}"
-            extra_state = str(need["source_ref"]).split(".state.")[-1] if ".state." in str(need["source_ref"]) else None
+            extra_state = _extra_animation_clip(need)
             clips = [dict(clip) for clip in BASELINE_CLIPS]
             if extra_state and extra_state not in {clip["name"] for clip in clips}:
                 clips.append(
                     {
-                        "name": _slug(extra_state).replace("-", "_"),
+                        "name": extra_state,
                         "frames": 6,
                         "fps": 12.0,
                         "loop": False,
-                        "events": [{"frame": 3, "event": str(extra_state)}],
+                        "events": [{"frame": 3, "event": extra_state}],
                     }
                 )
             animation = _record(
                 {
                     "asset_spec_id": asset_id,
-                    "body_family": "humanoid",
+                    "body_family": body_family,
                     "directions": DIRECTIONS,
                     "clips": clips,
                     "anchors": ["origin", "feet", "head", "main_hand", "off_hand", "muzzle", "effect"],
@@ -781,7 +823,7 @@ def _records_for_plan(
                     "required_neighbor_masks": list(range(256)),
                     "stage_constraints": {
                         "entrance_exit_connected": True,
-                        "required_encounters": True,
+                        "required_encounters": [],
                         "safe_spawn_radius": 2,
                         "retry_limit": 8,
                         "derived_seed": "sha256(base_seed:attempt)",
@@ -1615,7 +1657,7 @@ def _randomizer_resource(wav_paths: list[str]) -> bytes:
     lines = [f'[gd_resource type="AudioStreamRandomizer" load_steps={len(wav_paths) + 1} format=3]', ""]
     for index, path in enumerate(wav_paths, 1):
         lines.append(f'[ext_resource type="AudioStream" path="res://{path}" id="{index}_stream"]')
-    lines.extend(["", "[resource]", "random_pitch = 1.02", "random_volume_offset_db = 1.0", "playback_mode = 1", f"streams_count = {len(wav_paths)}"])
+    lines.extend(["", "[resource]", "random_pitch = 1.02", "random_volume_offset_db = 1.0", "playback_mode = 0", f"streams_count = {len(wav_paths)}"])
     for index in range(len(wav_paths)):
         lines.extend([f"stream_{index}/stream = ExtResource(\"{index + 1}_stream\")", f"stream_{index}/weight = 1.0"])
     lines.append("")
@@ -1644,8 +1686,13 @@ def _recipe_inputs(
     *,
     style: dict[str, Any] | None = None,
     part_by_id: dict[str, dict[str, Any]] | None = None,
+    parts_prevalidated: bool = False,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     current_style = style or _load_json(project / "work" / "assets" / "styles" / "STY-0001.json")
+    if not _validate_fingerprint(recipe):
+        raise WorkflowError(f"{recipe.get('id')}: recipe input fingerprint is invalid")
+    if not _validate_fingerprint(current_style):
+        raise WorkflowError(f"{current_style.get('id')}: style input fingerprint is invalid")
     parameters = recipe.get("parameters", {})
     expected_style = parameters.get("style_fingerprint")
     if expected_style != _style_generation_fingerprint(current_style):
@@ -1660,10 +1707,20 @@ def _recipe_inputs(
             part["id"]: part for part in _all_records(project, "parts", "PRT")
         }
         expected_hashes = recipe.get("parameters", {}).get("source_part_hashes", {})
+        body_family = str(parameters.get("body_family", ""))
+        required_directions = set(map(str, parameters.get("required_directions", DIRECTIONS)))
+        required_animations = {
+            str(clip.get("name")) for clip in parameters.get("clips", [])
+        }
+        anchor_reference: dict[str, Any] | None = None
         for part_id in recipe["source_part_ids"]:
             part = part_by_id.get(part_id)
             if not part:
                 raise WorkflowError(f"{recipe['id']}: missing source part {part_id}")
+            if not parts_prevalidated:
+                if not _validate_fingerprint(part):
+                    raise WorkflowError(f"{part_id}: source part input fingerprint is invalid")
+                _assert_schema(part, "part-spec.schema.json")
             if part.get("status") != "approved" or part.get("license") not in {
                 "original",
                 "CC0-1.0",
@@ -1675,6 +1732,36 @@ def _recipe_inputs(
                 raise WorkflowError(f"{recipe['id']}: source part {part_id} is not approved or compatible")
             if expected_hashes.get(part_id) != part.get("input_fingerprint"):
                 raise WorkflowError(f"{recipe['id']}: source part {part_id} changed; replan before generation")
+            if body_family not in part.get("compatible_body_families", []):
+                raise WorkflowError(
+                    f"{recipe['id']}: source part {part_id} is incompatible with body family {body_family}"
+                )
+            if not required_directions.issubset(set(map(str, part.get("compatible_directions", [])))):
+                raise WorkflowError(
+                    f"{recipe['id']}: source part {part_id} is incompatible with required directions"
+                )
+            compatible_animations = set(map(str, part.get("compatible_animations", [])))
+            if "*" not in compatible_animations and not required_animations.issubset(compatible_animations):
+                raise WorkflowError(
+                    f"{recipe['id']}: source part {part_id} is incompatible with required animations"
+                )
+            anchors = part.get("anchors", {})
+            if anchor_reference is None:
+                anchor_reference = dict(anchors)
+            elif anchors != anchor_reference:
+                raise WorkflowError(
+                    f"{recipe['id']}: source part {part_id} breaks anchor alignment"
+                )
+            occupancy = {
+                (int(point[0]), int(point[1])) for point in part.get("occupancy_mask", [])
+            }
+            pixels = {
+                (int(point[0]), int(point[1])) for point in part.get("pixels", [])
+            }
+            if not pixels.issubset(occupancy):
+                raise WorkflowError(
+                    f"{recipe['id']}: source part {part_id} occupancy mask omits painted pixels"
+                )
             if not part.get("mirror_safe"):
                 directional = part.get("direction_pixels")
                 if not isinstance(directional, dict) or set(directional) != set(DIRECTIONS):
@@ -1700,12 +1787,14 @@ def _compile_recipe(
     *,
     style: dict[str, Any] | None = None,
     part_by_id: dict[str, dict[str, Any]] | None = None,
+    parts_prevalidated: bool = False,
 ) -> dict[str, Any]:
     style, selected_parts = _recipe_inputs(
         project,
         recipe,
         style=style,
         part_by_id=part_by_id,
+        parts_prevalidated=parts_prevalidated,
     )
     outputs = [str(value) for value in recipe["outputs"]]
     for value in outputs:
@@ -1842,14 +1931,42 @@ def _generate_selected(
     if not recipes:
         raise WorkflowError("No media recipes match the requested asset specification")
     all_recipes = _all_records(project, "recipes", "RCP")
-    output_ids = {
-        path: f"AST-{index:04d}"
-        for index, path in enumerate(sorted(path for recipe in all_recipes for path in recipe["outputs"]), 1)
+    manifest_path = project / "assets" / "asset-manifest.json"
+    manifest = _load_json(manifest_path)
+    existing_assets = list(manifest.get("assets", []))
+    used_ids = {str(asset.get("id")) for asset in existing_assets}
+    reusable_ids = {
+        str(asset.get("runtime_path")): str(asset.get("id"))
+        for asset in existing_assets
+        if asset.get("provenance", {}).get("provider") == "aigame-local-media"
     }
+    output_ids: dict[str, str] = {}
+    next_asset_number = 1
+    for path in sorted(path for recipe in all_recipes for path in recipe["outputs"]):
+        reusable = reusable_ids.get(str(path))
+        if reusable:
+            output_ids[str(path)] = reusable
+            continue
+        while f"AST-{next_asset_number:04d}" in used_ids:
+            next_asset_number += 1
+        asset_id = f"AST-{next_asset_number:04d}"
+        output_ids[str(path)] = asset_id
+        used_ids.add(asset_id)
+        next_asset_number += 1
     style = _load_json(project / "work" / "assets" / "styles" / "STY-0001.json")
     part_by_id = {part["id"]: part for part in _all_records(project, "parts", "PRT")}
+    for part_id, part in part_by_id.items():
+        if not _validate_fingerprint(part):
+            raise WorkflowError(f"{part_id}: source part input fingerprint is invalid")
+        _assert_schema(part, "part-spec.schema.json")
     for recipe in recipes:
-        _recipe_inputs(project, recipe, style=style, part_by_id=part_by_id)
+        _recipe_inputs(
+            project,
+            recipe,
+            style=style,
+            part_by_id=part_by_id,
+            parts_prevalidated=True,
+        )
     cached_results: list[dict[str, Any]] = []
     misses: list[dict[str, Any]] = []
     for recipe in recipes:
@@ -1868,6 +1985,7 @@ def _generate_selected(
                         recipe,
                         style=style,
                         part_by_id=part_by_id,
+                        parts_prevalidated=True,
                     ),
                     "cache_hit": False,
                 },
@@ -1902,10 +2020,16 @@ def _generate_selected(
         hashes.extend(result["hashes"].values())
         for path, digest in sorted(result["hashes"].items()):
             new_records.append(_manifest_record(output_ids[path], recipe, path, digest))
-    manifest_path = project / "assets" / "asset-manifest.json"
-    manifest = _load_json(manifest_path)
-    managed_ids = set(output_ids.values())
-    preserved = [record for record in manifest.get("assets", []) if record.get("id") not in managed_ids]
+    selected_output_paths = {
+        str(path) for result in compiled_results for path in result["hashes"]
+    }
+    managed_ids = {output_ids[path] for path in selected_output_paths}
+    preserved = [
+        record
+        for record in manifest.get("assets", [])
+        if record.get("id") not in managed_ids
+        and str(record.get("runtime_path")) not in selected_output_paths
+    ]
     combined_by_id = {record["id"]: record for record in preserved}
     for record in new_records:
         combined_by_id[record["id"]] = record
@@ -1968,6 +2092,8 @@ def compose_recipe(root: Path | str, recipe_id: str, *, seed: int | None = None)
     recipe = _load_json(path)
     if seed is not None:
         recipe = {**recipe, "seed": int(seed)}
+        recipe.pop("input_fingerprint", None)
+        recipe["input_fingerprint"] = fingerprint(recipe)
     compiled = _compile_recipe(project, recipe)
     return {
         "schema_version": SCHEMA_VERSION,
@@ -2075,6 +2201,9 @@ def validate_assets(root: Path | str) -> dict[str, Any]:
     current_style_fingerprint = (
         _style_generation_fingerprint(current_style) if isinstance(current_style, dict) else None
     )
+    current_parts = {
+        record_id: record for record_id, record in records.items() if record_id.startswith("PRT-")
+    }
     for asset_id in spec_ids:
         spec = records.get(asset_id)
         if not spec:
@@ -2117,6 +2246,16 @@ def validate_assets(root: Path | str) -> dict[str, Any]:
             choice_ids = [part_id for slot in LAYER_SLOTS for part_id in choices.get(slot, [])]
             if choice_ids != recipe.get("source_part_ids") or any(part_id not in choice_ids for part_id in layer_ids):
                 errors.append(f"{recipe_id}: layer choices do not match source_part_ids")
+        if current_style:
+            try:
+                _recipe_inputs(
+                    project,
+                    recipe,
+                    style=current_style,
+                    part_by_id=current_parts,
+                )
+            except WorkflowError as error:
+                errors.append(str(error))
     for record_id, record in records.items():
         if not record_id.startswith("PRT-"):
             continue
@@ -2155,7 +2294,7 @@ def validate_assets(root: Path | str) -> dict[str, Any]:
         if asset.get("license") not in allowed_licenses:
             errors.append(f"{asset_id}: incompatible or unknown license {asset.get('license')!r}")
         try:
-            artifact_path = project / _safe_relative(runtime_path)
+            artifact_path = project / _safe_asset_relative(runtime_path)
         except WorkflowError as error:
             errors.append(f"{asset_id}: {error}")
             continue
@@ -2348,11 +2487,18 @@ def generate_wfc_layout(
     required_masks = set(tile_contract.get("required_neighbor_masks", []))
     if required_masks != set(range(256)) or set(tile_by_mask) != required_masks:
         raise WorkflowError("TileSetSpec must provide complete terrain neighbor masks 0 through 255")
+    weights = {
+        mask: max(0.0, float(tile.get("weight", 1.0)))
+        for mask, tile in tile_by_mask.items()
+    }
+    eligible_masks = {mask for mask, weight in weights.items() if weight > 0.0}
     navigation_masks = {
-        mask for mask, tile in tile_by_mask.items() if bool(tile.get("navigation"))
+        mask
+        for mask, tile in tile_by_mask.items()
+        if bool(tile.get("navigation")) and mask in eligible_masks
     }
     if not navigation_masks:
-        raise WorkflowError("TileSetSpec has no navigable terrain tile")
+        raise WorkflowError("TileSetSpec has no positive-weight navigable terrain tile")
     constraints = {**tile_contract.get("stage_constraints", {}), **(stage_constraints or {})}
     retry_limit = max(1, int(constraints.get("retry_limit", 8)))
     safe_radius = max(1, int(constraints.get("safe_spawn_radius", 2)))
@@ -2366,6 +2512,17 @@ def generate_wfc_layout(
     configured_rooms = constraints.get("required_rooms", [])
     if isinstance(configured_rooms, list):
         room_names = list(dict.fromkeys([*room_names, *map(str, configured_rooms)]))
+    configured_encounters = constraints.get("required_encounters", [])
+    if isinstance(configured_encounters, dict):
+        encounter_names = list(map(str, configured_encounters))
+    elif isinstance(configured_encounters, (list, tuple, set)):
+        encounter_names = list(map(str, configured_encounters))
+    elif isinstance(configured_encounters, str) and configured_encounters.strip():
+        encounter_names = [configured_encounters.strip()]
+    else:
+        encounter_names = []
+    encounter_names = list(dict.fromkeys(encounter_names))
+    placement_names = list(dict.fromkeys([*room_names, *encounter_names]))
 
     directions = (
         (0, -1),
@@ -2379,16 +2536,11 @@ def generate_wfc_layout(
     )
     bit_sets = {
         (direction, value): {
-            mask for mask in tile_by_mask if ((mask >> direction) & 1) == value
+            mask for mask in eligible_masks if ((mask >> direction) & 1) == value
         }
         for direction in range(8)
         for value in (0, 1)
     }
-    weights = {
-        mask: max(0.0, float(tile.get("weight", 1.0)))
-        for mask, tile in tile_by_mask.items()
-    }
-
     def weighted_choice(domain: set[int], rng: random.Random) -> int:
         ordered = sorted(domain)
         total = sum(weights[mask] for mask in ordered)
@@ -2406,7 +2558,7 @@ def generate_wfc_layout(
         derived_seed = hashlib.sha256(f"{int(seed)}:{attempt}".encode("ascii")).hexdigest()
         rng = random.Random(int(derived_seed[:16], 16))
         domains = {
-            (x, y): set(tile_by_mask)
+            (x, y): set(eligible_masks)
             for y in range(height)
             for x in range(width)
         }
@@ -2428,7 +2580,9 @@ def generate_wfc_layout(
         for cell in route:
             domains[cell].intersection_update(navigation_masks)
 
-        queue = deque(cell for cell, domain in domains.items() if len(domain) < 256)
+        queue = deque(
+            cell for cell, domain in domains.items() if len(domain) < len(eligible_masks)
+        )
 
         def propagate() -> bool:
             nonlocal last_reason
@@ -2512,15 +2666,17 @@ def generate_wfc_layout(
             )
             if cell not in {entrance, exit_cell}
         ]
-        if not safe_spawns or len(room_names) > len(room_candidates):
+        if not safe_spawns or len(placement_names) > len(room_candidates):
             last_reason = "required rooms or safe spawns exceed connected navigable cells"
             continue
-        placements: dict[str, list[int]] = {}
-        for index, name in enumerate(room_names):
+        all_placements: dict[str, list[int]] = {}
+        for index, name in enumerate(placement_names):
             position = room_candidates[
-                ((index + 1) * len(room_candidates)) // (len(room_names) + 1)
+                ((index + 1) * len(room_candidates)) // (len(placement_names) + 1)
             ]
-            placements[name] = list(position)
+            all_placements[name] = list(position)
+        placements = {name: all_placements[name] for name in room_names}
+        encounter_placements = {name: all_placements[name] for name in encounter_names}
         tile_grid = [
             [str(tile_by_mask[collapsed[(x, y)]]["id"]) for x in range(width)]
             for y in range(height)
@@ -2544,6 +2700,7 @@ def generate_wfc_layout(
             "exit": list(exit_cell),
             "safe_spawns": safe_spawns,
             "required_rooms": placements,
+            "required_encounters": encounter_placements,
             "path_length": distances[exit_cell],
             "valid": True,
         }
@@ -2651,6 +2808,8 @@ def benchmark_assets(
                         "palette_id": style["id"],
                         "palette": style["palette"],
                         "style_fingerprint": _style_generation_fingerprint(style),
+                        "body_family": "humanoid",
+                        "required_directions": DIRECTIONS,
                         "layers": [
                             {
                                 "slot": benchmark_part["slot"],
