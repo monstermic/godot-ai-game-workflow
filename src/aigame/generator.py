@@ -35,17 +35,36 @@ const LAYER_SLOTS := [
 
 var _cache: Dictionary = {}
 
-func cache_key(recipe: Dictionary, seed: int) -> String:
+func cache_key(recipe: Dictionary, seed: int, parts: Dictionary = {}) -> String:
     var context := HashingContext.new()
     context.start(HashingContext.HASH_SHA256)
     context.update((JSON.stringify(recipe) + ":" + str(seed)).to_utf8_buffer())
+    var part_ids: Array = parts.keys()
+    part_ids.sort()
+    for part_id in part_ids:
+        context.update(("|" + str(part_id) + "|").to_utf8_buffer())
+        var source = parts[part_id]
+        var part_image: Image
+        if source is Texture2D:
+            part_image = source.get_image()
+        elif source is Image:
+            part_image = source
+        elif source is Dictionary:
+            context.update(JSON.stringify(source).to_utf8_buffer())
+        else:
+            context.update(str(source).to_utf8_buffer())
+        if part_image != null:
+            context.update(
+                (str(part_image.get_width()) + "x" + str(part_image.get_height()) + ":" + str(part_image.get_format())).to_utf8_buffer()
+            )
+            context.update(part_image.get_data())
     return context.finish().hex_encode()
 
-func get_cached(recipe: Dictionary, seed: int) -> Texture2D:
-    return _cache.get(cache_key(recipe, seed))
+func get_cached(recipe: Dictionary, seed: int, parts: Dictionary = {}) -> Texture2D:
+    return _cache.get(cache_key(recipe, seed, parts))
 
 func compose(recipe: Dictionary, parts: Dictionary, seed: int) -> Texture2D:
-    var key := cache_key(recipe, seed)
+    var key := cache_key(recipe, seed, parts)
     if _cache.has(key):
         return _cache[key]
     var image := Image.create(GRID_SIZE, GRID_SIZE, false, Image.FORMAT_RGBA8)

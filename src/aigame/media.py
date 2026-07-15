@@ -7,6 +7,7 @@ import math
 import random
 import re
 import subprocess
+import tempfile
 import time
 import tomllib
 import wave
@@ -104,6 +105,24 @@ SCHEMA_BY_PREFIX = {
     "SND": "sound-spec.schema.json",
     "RCP": "media-recipe.schema.json",
 }
+STYLE_GENERATION_FIELDS = (
+    "grid_size",
+    "perspective",
+    "directions",
+    "palette",
+    "layer_slots",
+    "outline",
+    "lighting",
+    "silhouettes",
+    "animation_defaults",
+    "audio_vocabulary",
+    "blueprint_fingerprint",
+)
+MEDIA_TERMS = re.compile(
+    r"\b(visual|audiovisual|animation|sprite|portrait|icon|ui|hud|menu|cursor|tile|terrain|"
+    r"particle|effect|telegraph|audio|sound|sfx|music|ambience|controller|rumble|feedback)\b",
+    re.IGNORECASE,
+)
 
 
 def _project(root: Path | str) -> Path:
@@ -339,11 +358,21 @@ def _collect_needs(project: Path) -> tuple[list[dict[str, Any]], str]:
 
     blueprint_id = str(blueprint.get("id", "BLU-0001"))
     required_scalar = {
+        "moment_to_moment_loop": "moment-to-moment feedback",
+        "session_loop": "session-loop progress presentation",
+        "long_term_loop": "long-term progression presentation",
         "opening": "opening presentation",
+        "first_minute": "first-minute onboarding presentation",
         "tutorial": "tutorial visuals",
+        "first_meaningful_decision": "first meaningful decision presentation",
+        "final_challenge": "final challenge presentation and telegraph",
+        "recovery": "loss recovery presentation",
         "ending": "ending presentation",
         "credits": "credits presentation",
         "postgame": "postgame presentation",
+        "replay": "replay presentation",
+        "endgame": "endgame presentation",
+        "save_and_recovery": "save, interruption, and recovery presentation",
     }
     for field, label in required_scalar.items():
         value = blueprint.get(field)
@@ -362,6 +391,88 @@ def _collect_needs(project: Path) -> tuple[list[dict[str, Any]], str]:
             f"Major encounter telegraph and defeat effect for {encounter}",
             "particle",
         )
+
+    def add_nested(field: str, value: Any, label: str, default_kind: str = "ui", path: str = "") -> None:
+        source = f"{blueprint_id}.{field}{path}"
+        if isinstance(value, dict):
+            for key in sorted(value):
+                add_nested(field, value[key], label, default_kind, f"{path}.{key}")
+            return
+        if isinstance(value, list):
+            for index, item in enumerate(value):
+                add_nested(field, item, label, default_kind, f"{path}[{index}]")
+            return
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return
+        purpose = f"{label}: {value}"
+        add(source, purpose, _kind_for(purpose, hint=default_kind))
+
+    for field, label in (
+        ("player_verbs", "player-verb animation and feedback"),
+        ("setbacks", "setback feedback and recovery cue"),
+        ("final_prerequisites", "final-challenge prerequisite indicator"),
+        ("win_conditions", "win-state presentation"),
+        ("loss_conditions", "loss-state presentation"),
+        ("alternate_endings", "alternate-ending presentation"),
+        ("ux_information", "required HUD information"),
+        ("systems_overview", "system-state feedback"),
+        ("accessibility", "accessible non-exclusive feedback"),
+    ):
+        add_nested(field, blueprint.get(field, []), label, "ui")
+    narrative = blueprint.get("narrative", {})
+    if isinstance(narrative, dict) and narrative.get("applicability") != "not_applicable":
+        for field in ("premise", "character_arcs", "acts", "resolution"):
+            add_nested("narrative", narrative.get(field), "narrative presentation", "ui", f".{field}")
+    add_nested("progression_system", blueprint.get("progression_system", {}), "progression feedback", "ui")
+    add_nested("economy", blueprint.get("economy", {}), "economy icon and feedback", "ui")
+    add_nested("difficulty", blueprint.get("difficulty", {}), "difficulty and assist feedback", "ui")
+    add_nested("platform_and_input", blueprint.get("platform_and_input", {}), "platform and input glyph", "ui")
+    for generator_field in (
+        "procedural_generators",
+        "stage_generators",
+        "enemy_generators",
+        "procedural_pools",
+    ):
+        if generator_field in blueprint:
+            add_nested(
+                generator_field,
+                blueprint[generator_field],
+                "procedural generator source pool",
+                "tileset" if "stage" in generator_field else "sprite",
+            )
+
+    dod_records = [_load_json(path) for path in sorted((project / "work" / "concept").glob("GDD-*.json"))]
+    for dod in dod_records:
+        for criterion in dod.get("criteria", []):
+            text = " ".join(
+                [str(criterion.get("title", "")), *map(str, criterion.get("acceptance_criteria", []))]
+            )
+            if criterion.get("release_blocking") and MEDIA_TERMS.search(text):
+                add(
+                    f"{dod.get('id')}.criteria.{criterion.get('id')}",
+                    f"Release-blocking media Definition of Done: {text}",
+                    _kind_for(text),
+                )
+    requirement_records = [
+        _load_json(path)
+        for path in sorted((project / "work" / "requirements").glob("REQ-*.json"))
+    ]
+    for requirement in requirement_records:
+        if requirement.get("status") == "deprecated":
+            continue
+        text = " ".join(
+            [
+                str(requirement.get("title", "")),
+                str(requirement.get("player_value", "")),
+                *map(str, requirement.get("acceptance_criteria", [])),
+            ]
+        )
+        if MEDIA_TERMS.search(text):
+            add(
+                f"{requirement.get('id')}.media",
+                f"Requirement-bound media: {text}",
+                _kind_for(text),
+            )
     add(
         f"{blueprint_id}.art_direction",
         f"Representative style sample: {blueprint.get('art_direction', '')}",
@@ -398,6 +509,8 @@ def _collect_needs(project: Path) -> tuple[list[dict[str, Any]], str]:
         "mechanics": mechanics,
         "content": content,
         "blueprint": blueprint,
+        "definition_of_done": dod_records,
+        "requirements": requirement_records,
     }
     return canonical, fingerprint(source_material)
 
@@ -439,6 +552,14 @@ def _style_record(blueprint_fingerprint: str) -> dict[str, Any]:
         record_id="STY-0001",
         status="draft",
     )
+
+
+def _style_generation_material(style: dict[str, Any]) -> dict[str, Any]:
+    return {field: style.get(field) for field in STYLE_GENERATION_FIELDS}
+
+
+def _style_generation_fingerprint(style: dict[str, Any]) -> str:
+    return fingerprint(_style_generation_material(style))
 
 
 def _part_records(style: dict[str, Any]) -> list[dict[str, Any]]:
@@ -593,6 +714,7 @@ def _records_for_plan(
             "grid_size": 16,
             "palette_id": style["id"],
             "palette": style["palette"],
+            "style_fingerprint": _style_generation_fingerprint(style),
             "purpose": need["purpose"],
             "output_license": "CC0-1.0",
         }
@@ -832,6 +954,73 @@ def _record_destinations(project: Path, records: dict[str, Any]) -> list[tuple[P
     return destinations
 
 
+def _reconcile_planned_records(
+    project: Path,
+    records: dict[str, Any],
+    destinations: list[tuple[Path, dict[str, Any]]],
+) -> None:
+    previous_recipes = {
+        recipe["id"]: recipe for recipe in _all_records(project, "recipes", "RCP")
+    }
+    desired_paths = {path.resolve() for path, _ in destinations}
+    managed = {
+        "styles": "STY-*.json",
+        "parts": "PRT-*.json",
+        "specs": "ASP-*.json",
+        "recipes": "RCP-*.json",
+        "animations": "ANI-*.json",
+        "tiles": "TIL-*.json",
+        "particles": "PFX-*.json",
+        "sounds": "SND-*.json",
+    }
+    for folder, pattern in managed.items():
+        for path in (project / "work" / "assets" / folder).glob(pattern):
+            if path.resolve() not in desired_paths:
+                path.unlink()
+
+    current_recipes = {recipe["id"]: recipe for recipe in records["recipes"]}
+    current_outputs = {
+        str(path): (str(recipe["id"]), str(recipe["input_fingerprint"]))
+        for recipe in records["recipes"]
+        for path in recipe.get("outputs", [])
+    }
+    for recipe_id, previous in previous_recipes.items():
+        current = current_recipes.get(recipe_id)
+        if current and current.get("input_fingerprint") == previous.get("input_fingerprint"):
+            continue
+        for runtime_path in previous.get("outputs", []):
+            artifact = project / _safe_relative(str(runtime_path))
+            if artifact.is_file():
+                artifact.unlink()
+    manifest_path = project / "assets" / "asset-manifest.json"
+    manifest = _load_json(manifest_path)
+    kept_assets: list[dict[str, Any]] = []
+    for asset in manifest.get("assets", []):
+        provenance = asset.get("provenance", {})
+        if provenance.get("provider") != "aigame-local-media":
+            kept_assets.append(asset)
+            continue
+        recipe_id = str(provenance.get("recipe_id", ""))
+        recipe = current_recipes.get(recipe_id)
+        runtime_path = str(asset.get("runtime_path", ""))
+        if (
+            recipe
+            and provenance.get("recipe_sha256") == recipe.get("input_fingerprint")
+            and current_outputs.get(runtime_path)
+            == (recipe_id, str(recipe.get("input_fingerprint")))
+        ):
+            kept_assets.append(asset)
+    if kept_assets != manifest.get("assets", []):
+        _write_json(
+            manifest_path,
+            {
+                **manifest,
+                "revision": int(manifest.get("revision", 0)) + 1,
+                "assets": kept_assets,
+            },
+        )
+
+
 def _render_asset_docs(project: Path, records: dict[str, Any]) -> None:
     plan = records["plan"]
     specs = records["specs"]
@@ -886,6 +1075,7 @@ def plan_assets(root: Path | str, *, apply: bool = False) -> dict[str, Any]:
     }
     if not apply:
         return result
+    _reconcile_planned_records(project, records, destinations)
     for path, record in destinations:
         _write_json(path, record)
     _write_json(
@@ -935,7 +1125,9 @@ def _approval_request(project: Path, style: dict[str, Any], sample_hashes: list[
     )
     commit_sha = result.stdout.strip() if result.returncode == 0 and re.fullmatch(r"[0-9a-f]{40}", result.stdout.strip()) else "UNCOMMITTED"
     return {
-        "scope_hash": fingerprint({"style": style, "samples": sample_hashes}),
+        "scope_hash": fingerprint(
+            {"style": _style_generation_material(style), "samples": sample_hashes}
+        ),
         "commit_sha": commit_sha,
         "decision": "Approve the representative pixel-art and procedural-audio style for bulk generation.",
     }
@@ -1009,11 +1201,7 @@ def sample_assets(
     style_path = project / "work" / "assets" / "styles" / "STY-0001.json"
     style = _load_json(style_path)
     sample_hashes = sorted(sample_result["hashes"])
-    request = (
-        dict(state["pending_approval"])
-        if approval_path and isinstance(state.get("pending_approval"), dict)
-        else _approval_request(project, style, sample_hashes)
-    )
+    request = _approval_request(project, style, sample_hashes)
     if is_ai_staging(project):
         approval = create_agent_approval(project, request)
     elif approval_path:
@@ -1450,16 +1638,25 @@ def _synchronized_resource(wav_paths: list[str]) -> bytes:
     return "\n".join(lines).encode("utf-8")
 
 
-def _compile_recipe(project: Path, recipe: dict[str, Any]) -> dict[str, Any]:
-    style = _load_json(project / "work" / "assets" / "styles" / "STY-0001.json")
-    outputs = [str(value) for value in recipe["outputs"]]
-    for value in outputs:
-        _safe_relative(value)
-    kind = str(recipe["kind"])
-    compiled: dict[str, bytes] = {}
+def _recipe_inputs(
+    project: Path,
+    recipe: dict[str, Any],
+    *,
+    style: dict[str, Any] | None = None,
+    part_by_id: dict[str, dict[str, Any]] | None = None,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    current_style = style or _load_json(project / "work" / "assets" / "styles" / "STY-0001.json")
+    parameters = recipe.get("parameters", {})
+    expected_style = parameters.get("style_fingerprint")
+    if expected_style != _style_generation_fingerprint(current_style):
+        raise WorkflowError(f"{recipe['id']}: style pack changed; replan before generation")
+    pinned_palette = parameters.get("palette")
+    if not isinstance(pinned_palette, dict) or pinned_palette != current_style.get("palette"):
+        raise WorkflowError(f"{recipe['id']}: style pack changed; replan before generation")
+    compile_style = {**current_style, "palette": pinned_palette}
     selected_parts: list[dict[str, Any]] = []
     if recipe.get("source_part_ids"):
-        part_by_id = {
+        part_by_id = part_by_id or {
             part["id"]: part for part in _all_records(project, "parts", "PRT")
         }
         expected_hashes = recipe.get("parameters", {}).get("source_part_hashes", {})
@@ -1483,7 +1680,7 @@ def _compile_recipe(project: Path, recipe: dict[str, Any]) -> dict[str, Any]:
                 if not isinstance(directional, dict) or set(directional) != set(DIRECTIONS):
                     raise WorkflowError(f"{recipe['id']}: asymmetric part {part_id} requires all four directions")
             for pixel in part.get("pixels", []):
-                if len(pixel) != 3 or str(pixel[2]) not in style.get("palette", {}):
+                if len(pixel) != 3 or str(pixel[2]) not in compile_style.get("palette", {}):
                     raise WorkflowError(f"{recipe['id']}: source part {part_id} uses an unknown semantic color")
             selected_parts.append(part)
         choices = recipe.get("parameters", {}).get("layer_choices", {})
@@ -1494,6 +1691,27 @@ def _compile_recipe(project: Path, recipe: dict[str, Any]) -> dict[str, Any]:
                 for slot_index, slot in enumerate(LAYER_SLOTS)
                 if (options := choices.get(slot, []))
             ]
+    return compile_style, selected_parts
+
+
+def _compile_recipe(
+    project: Path,
+    recipe: dict[str, Any],
+    *,
+    style: dict[str, Any] | None = None,
+    part_by_id: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    style, selected_parts = _recipe_inputs(
+        project,
+        recipe,
+        style=style,
+        part_by_id=part_by_id,
+    )
+    outputs = [str(value) for value in recipe["outputs"]]
+    for value in outputs:
+        _safe_relative(value)
+    kind = str(recipe["kind"])
+    compiled: dict[str, bytes] = {}
     if kind in {"sound", "ambience", "music"}:
         sound = dict(recipe["parameters"]["sound"])
         wav_paths = [path for path in outputs if path.endswith(".wav")]
@@ -1542,20 +1760,39 @@ def _receipt_path(project: Path, recipe: dict[str, Any]) -> Path:
     return project / ".aigame" / "cache" / "media" / f"{recipe['input_fingerprint']}.json"
 
 
-def _cache_hit(project: Path, compiled: dict[str, bytes], hashes: dict[str, str], receipt: Path) -> bool:
+def _cached_recipe_result(
+    project: Path,
+    recipe: dict[str, Any],
+) -> dict[str, Any] | None:
+    receipt = _receipt_path(project, recipe)
     if not receipt.is_file():
-        return False
+        return None
     try:
         value = _load_json(receipt)
     except WorkflowError:
-        return False
-    if value.get("outputs") != hashes:
-        return False
-    return all(
-        (project / _safe_relative(path)).is_file()
-        and hashlib.sha256((project / _safe_relative(path)).read_bytes()).hexdigest() == digest
-        for path, digest in hashes.items()
-    )
+        return None
+    hashes = value.get("outputs")
+    if (
+        value.get("recipe_id") != recipe.get("id")
+        or value.get("recipe_fingerprint") != recipe.get("input_fingerprint")
+        or not isinstance(hashes, dict)
+        or set(map(str, hashes)) != set(map(str, recipe.get("outputs", [])))
+    ):
+        return None
+    for path, digest in hashes.items():
+        artifact = project / _safe_relative(str(path))
+        if (
+            not artifact.is_file()
+            or not isinstance(digest, str)
+            or hashlib.sha256(artifact.read_bytes()).hexdigest() != digest
+        ):
+            return None
+    return {
+        "recipe": recipe,
+        "compiled": {},
+        "hashes": {str(path): str(digest) for path, digest in hashes.items()},
+        "cache_hit": True,
+    }
 
 
 def _manifest_record(asset_id: str, recipe: dict[str, Any], path: str, digest: str) -> dict[str, Any]:
@@ -1609,16 +1846,45 @@ def _generate_selected(
         path: f"AST-{index:04d}"
         for index, path in enumerate(sorted(path for recipe in all_recipes for path in recipe["outputs"]), 1)
     }
+    style = _load_json(project / "work" / "assets" / "styles" / "STY-0001.json")
+    part_by_id = {part["id"]: part for part in _all_records(project, "parts", "PRT")}
+    for recipe in recipes:
+        _recipe_inputs(project, recipe, style=style, part_by_id=part_by_id)
+    cached_results: list[dict[str, Any]] = []
+    misses: list[dict[str, Any]] = []
+    for recipe in recipes:
+        hit = _cached_recipe_result(project, recipe)
+        if hit:
+            cached_results.append(hit)
+        else:
+            misses.append(recipe)
     worker_count = max(1, min(int(jobs), 64))
     with ThreadPoolExecutor(max_workers=worker_count) as executor:
-        compiled_results = list(executor.map(lambda recipe: _compile_recipe(project, recipe), recipes))
+        compiled_results = list(
+            executor.map(
+                lambda recipe: {
+                    **_compile_recipe(
+                        project,
+                        recipe,
+                        style=style,
+                        part_by_id=part_by_id,
+                    ),
+                    "cache_hit": False,
+                },
+                misses,
+            )
+        )
+    results_by_id = {
+        result["recipe"]["id"]: result for result in [*cached_results, *compiled_results]
+    }
+    compiled_results = [results_by_id[recipe["id"]] for recipe in recipes]
     generated = cached = 0
     hashes: list[str] = []
     new_records: list[dict[str, Any]] = []
     for result in compiled_results:
         recipe = result["recipe"]
         receipt = _receipt_path(project, recipe)
-        if _cache_hit(project, result["compiled"], result["hashes"], receipt):
+        if result["cache_hit"]:
             cached += 1
         else:
             for path, payload in sorted(result["compiled"].items()):
@@ -1805,6 +2071,10 @@ def validate_assets(root: Path | str) -> dict[str, Any]:
         if plan.get("blueprint_fingerprint") != current_blueprint_fingerprint:
             errors.append("APL-0001: blueprint fingerprint changed; replan assets")
     recipe_ids = {record_id for record_id in records if record_id.startswith("RCP-")}
+    current_style = records.get(str(plan.get("style_pack_id", "STY-0001")))
+    current_style_fingerprint = (
+        _style_generation_fingerprint(current_style) if isinstance(current_style, dict) else None
+    )
     for asset_id in spec_ids:
         spec = records.get(asset_id)
         if not spec:
@@ -1820,6 +2090,11 @@ def validate_assets(root: Path | str) -> dict[str, Any]:
                 errors.append(f"{asset_id}: {error}")
     for recipe_id in recipe_ids:
         recipe = records[recipe_id]
+        parameters = recipe.get("parameters", {})
+        if parameters.get("style_fingerprint") != current_style_fingerprint:
+            errors.append(f"{recipe_id}: style pack changed; replan assets")
+        if not current_style or parameters.get("palette") != current_style.get("palette"):
+            errors.append(f"{recipe_id}: pinned palette does not match the current style pack")
         if recipe.get("asset_spec_id") not in spec_ids:
             errors.append(f"{recipe_id}: dangling asset specification {recipe.get('asset_spec_id')}")
         for part_id in recipe.get("source_part_ids", []):
@@ -2021,83 +2296,260 @@ def generate_wfc_layout(
     height: int,
     seed: int,
     required_rooms: Iterable[str] = (),
+    tile_set: dict[str, Any] | Path | str | None = None,
+    stage_constraints: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if width < 7 or height < 7:
         raise WorkflowError("Stage dimensions must be at least 7x7")
     width = width if width % 2 else width - 1
     height = height if height % 2 else height - 1
-    rng = random.Random(int(seed))
-    grid = [["wall" for _ in range(width)] for _ in range(height)]
-    entrance = (1, 1)
-    stack = [entrance]
-    grid[1][1] = "floor"
-    visited = {entrance}
-    while stack:
-        x, y = stack[-1]
-        neighbors = [
-            (x + dx, y + dy, dx, dy)
-            for dx, dy in ((2, 0), (-2, 0), (0, 2), (0, -2))
-            if 1 <= x + dx < width - 1 and 1 <= y + dy < height - 1 and (x + dx, y + dy) not in visited
-        ]
-        if not neighbors:
-            stack.pop()
-            continue
-        nx, ny, dx, dy = rng.choice(neighbors)
-        grid[y + dy // 2][x + dx // 2] = "floor"
-        grid[ny][nx] = "floor"
-        visited.add((nx, ny))
-        stack.append((nx, ny))
-    exit_cell = (width - 2, height - 2)
-    if grid[exit_cell[1]][exit_cell[0]] != "floor":
-        grid[exit_cell[1]][exit_cell[0]] = "floor"
-    queue = deque([(entrance, 0)])
-    distances = {entrance: 0}
-    while queue:
-        (x, y), distance = queue.popleft()
-        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-            neighbor = (x + dx, y + dy)
-            if (
-                0 <= neighbor[0] < width
-                and 0 <= neighbor[1] < height
-                and grid[neighbor[1]][neighbor[0]] == "floor"
-                and neighbor not in distances
-            ):
-                distances[neighbor] = distance + 1
-                queue.append((neighbor, distance + 1))
-    valid = exit_cell in distances
-    safe_spawns = sorted(
-        [list(cell) for cell, distance in distances.items() if distance >= 2 and cell != exit_cell],
-        key=lambda cell: (cell[1], cell[0]),
-    )[:8]
-    room_names = list(required_rooms)
-    room_candidates = [
-        cell
-        for cell, _ in sorted(distances.items(), key=lambda item: (item[1], item[0][1], item[0][0]))
-        if cell not in {entrance, exit_cell}
-    ]
-    if len(room_names) > len(room_candidates):
-        raise WorkflowError("Stage contradiction: required rooms exceed available connected cells")
-    placements: dict[str, list[int]] = {}
-    for index, name in enumerate(room_names):
-        position = room_candidates[((index + 1) * len(room_candidates)) // (len(room_names) + 1)]
-        placements[str(name)] = list(position)
-    derived_seed = hashlib.sha256(f"{int(seed)}:0".encode("ascii")).hexdigest()
-    return {
-        "schema_version": SCHEMA_VERSION,
-        "algorithm": "seeded-adjacency-collapse-v1",
-        "seed": int(seed),
-        "derived_seed": derived_seed,
-        "attempt": 0,
-        "width": width,
-        "height": height,
-        "grid": ["".join("." if cell == "floor" else "#" for cell in row) for row in grid],
-        "entrance": list(entrance),
-        "exit": list(exit_cell),
-        "safe_spawns": safe_spawns,
-        "required_rooms": placements,
-        "path_length": distances.get(exit_cell, 0),
-        "valid": valid and bool(safe_spawns),
+    if tile_set is None:
+        tile_contract: dict[str, Any] = {
+            "id": "TIL-BUILTIN",
+            "tiles": [
+                {
+                    "id": f"terrain-{mask:03d}",
+                    "weight": 1.0,
+                    "collision": mask != 255,
+                    "navigation": mask == 255,
+                }
+                for mask in range(256)
+            ],
+            "adjacency": {
+                "encoding": "8-neighbor-bitmask",
+                "opposite_edges_must_match": True,
+            },
+            "required_neighbor_masks": list(range(256)),
+            "stage_constraints": {
+                "entrance_exit_connected": True,
+                "safe_spawn_radius": 2,
+                "retry_limit": 8,
+            },
+        }
+    elif isinstance(tile_set, (str, Path)):
+        tile_contract = _load_json(Path(tile_set))
+    else:
+        tile_contract = dict(tile_set)
+    adjacency = tile_contract.get("adjacency", {})
+    if (
+        adjacency.get("encoding") != "8-neighbor-bitmask"
+        or adjacency.get("opposite_edges_must_match") is not True
+    ):
+        raise WorkflowError("TileSetSpec requires 8-neighbor opposite-edge adjacency rules")
+    tile_by_mask: dict[int, dict[str, Any]] = {}
+    for tile in tile_contract.get("tiles", []):
+        match = re.search(r"([0-9]{3})$", str(tile.get("id", "")))
+        mask = tile.get("neighbor_mask")
+        if mask is None and match:
+            mask = int(match.group(1))
+        if not isinstance(mask, int) or not 0 <= mask <= 255 or mask in tile_by_mask:
+            raise WorkflowError("TileSetSpec contains invalid or duplicate neighbor masks")
+        tile_by_mask[mask] = dict(tile)
+    required_masks = set(tile_contract.get("required_neighbor_masks", []))
+    if required_masks != set(range(256)) or set(tile_by_mask) != required_masks:
+        raise WorkflowError("TileSetSpec must provide complete terrain neighbor masks 0 through 255")
+    navigation_masks = {
+        mask for mask, tile in tile_by_mask.items() if bool(tile.get("navigation"))
     }
+    if not navigation_masks:
+        raise WorkflowError("TileSetSpec has no navigable terrain tile")
+    constraints = {**tile_contract.get("stage_constraints", {}), **(stage_constraints or {})}
+    retry_limit = max(1, int(constraints.get("retry_limit", 8)))
+    safe_radius = max(1, int(constraints.get("safe_spawn_radius", 2)))
+    entrance_value = constraints.get("entrance", [1, 1])
+    exit_value = constraints.get("exit", [width - 2, height - 2])
+    entrance = (int(entrance_value[0]), int(entrance_value[1]))
+    exit_cell = (int(exit_value[0]), int(exit_value[1]))
+    if not all(1 <= x < width - 1 and 1 <= y < height - 1 for x, y in (entrance, exit_cell)):
+        raise WorkflowError("Stage entrance and exit must be inside the terrain boundary")
+    room_names = list(dict.fromkeys(map(str, required_rooms)))
+    configured_rooms = constraints.get("required_rooms", [])
+    if isinstance(configured_rooms, list):
+        room_names = list(dict.fromkeys([*room_names, *map(str, configured_rooms)]))
+
+    directions = (
+        (0, -1),
+        (1, -1),
+        (1, 0),
+        (1, 1),
+        (0, 1),
+        (-1, 1),
+        (-1, 0),
+        (-1, -1),
+    )
+    bit_sets = {
+        (direction, value): {
+            mask for mask in tile_by_mask if ((mask >> direction) & 1) == value
+        }
+        for direction in range(8)
+        for value in (0, 1)
+    }
+    weights = {
+        mask: max(0.0, float(tile.get("weight", 1.0)))
+        for mask, tile in tile_by_mask.items()
+    }
+
+    def weighted_choice(domain: set[int], rng: random.Random) -> int:
+        ordered = sorted(domain)
+        total = sum(weights[mask] for mask in ordered)
+        if total <= 0:
+            raise WorkflowError("Stage contradiction: every remaining tile has zero weight")
+        target = rng.random() * total
+        for mask in ordered:
+            target -= weights[mask]
+            if target <= 0:
+                return mask
+        return ordered[-1]
+
+    last_reason = "unknown contradiction"
+    for attempt in range(retry_limit):
+        derived_seed = hashlib.sha256(f"{int(seed)}:{attempt}".encode("ascii")).hexdigest()
+        rng = random.Random(int(derived_seed[:16], 16))
+        domains = {
+            (x, y): set(tile_by_mask)
+            for y in range(height)
+            for x in range(width)
+        }
+        for (x, y), domain in domains.items():
+            for direction, (dx, dy) in enumerate(directions):
+                if not (0 <= x + dx < width and 0 <= y + dy < height):
+                    domain.intersection_update(bit_sets[(direction, 0)])
+
+        route = [entrance]
+        x, y = entrance
+        while (x, y) != exit_cell:
+            options: list[tuple[int, int]] = []
+            if x != exit_cell[0]:
+                options.append((x + (1 if exit_cell[0] > x else -1), y))
+            if y != exit_cell[1]:
+                options.append((x, y + (1 if exit_cell[1] > y else -1)))
+            x, y = rng.choice(options)
+            route.append((x, y))
+        for cell in route:
+            domains[cell].intersection_update(navigation_masks)
+
+        queue = deque(cell for cell, domain in domains.items() if len(domain) < 256)
+
+        def propagate() -> bool:
+            nonlocal last_reason
+            while queue:
+                cell = queue.popleft()
+                domain = domains[cell]
+                if not domain:
+                    last_reason = f"empty domain at {cell}"
+                    return False
+                x, y = cell
+                for direction, (dx, dy) in enumerate(directions):
+                    neighbor = (x + dx, y + dy)
+                    if neighbor not in domains:
+                        continue
+                    possible_bits = {(mask >> direction) & 1 for mask in domain}
+                    allowed = set()
+                    for value in possible_bits:
+                        allowed.update(bit_sets[((direction + 4) % 8, value)])
+                    reduced = domains[neighbor].intersection(allowed)
+                    if not reduced:
+                        last_reason = f"adjacency contradiction between {cell} and {neighbor}"
+                        return False
+                    if reduced != domains[neighbor]:
+                        domains[neighbor] = reduced
+                        queue.append(neighbor)
+            return True
+
+        if not propagate():
+            continue
+        contradicted = False
+        while True:
+            unresolved = [
+                (len(domain), cell)
+                for cell, domain in domains.items()
+                if len(domain) > 1
+            ]
+            if not unresolved:
+                break
+            entropy = min(value[0] for value in unresolved)
+            candidates = [cell for size, cell in unresolved if size == entropy]
+            cell = rng.choice(sorted(candidates, key=lambda value: (value[1], value[0])))
+            try:
+                domains[cell] = {weighted_choice(domains[cell], rng)}
+            except WorkflowError as error:
+                last_reason = str(error)
+                contradicted = True
+                break
+            queue.append(cell)
+            if not propagate():
+                contradicted = True
+                break
+        if contradicted:
+            continue
+        collapsed = {cell: next(iter(domain)) for cell, domain in domains.items()}
+        walkable = {cell for cell, mask in collapsed.items() if mask in navigation_masks}
+        distances = {entrance: 0}
+        queue = deque([entrance])
+        while queue:
+            x, y = queue.popleft()
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                neighbor = (x + dx, y + dy)
+                if neighbor in walkable and neighbor not in distances:
+                    distances[neighbor] = distances[(x, y)] + 1
+                    queue.append(neighbor)
+        if exit_cell not in distances:
+            last_reason = "entrance and exit are not connected"
+            continue
+        safe_spawns = sorted(
+            [
+                list(cell)
+                for cell, distance in distances.items()
+                if distance >= safe_radius and cell != exit_cell
+            ],
+            key=lambda cell: (cell[1], cell[0]),
+        )[:8]
+        room_candidates = [
+            cell
+            for cell, _ in sorted(
+                distances.items(),
+                key=lambda item: (item[1], item[0][1], item[0][0]),
+            )
+            if cell not in {entrance, exit_cell}
+        ]
+        if not safe_spawns or len(room_names) > len(room_candidates):
+            last_reason = "required rooms or safe spawns exceed connected navigable cells"
+            continue
+        placements: dict[str, list[int]] = {}
+        for index, name in enumerate(room_names):
+            position = room_candidates[
+                ((index + 1) * len(room_candidates)) // (len(room_names) + 1)
+            ]
+            placements[name] = list(position)
+        tile_grid = [
+            [str(tile_by_mask[collapsed[(x, y)]]["id"]) for x in range(width)]
+            for y in range(height)
+        ]
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "algorithm": "wave-function-collapse-v1",
+            "tile_set_id": str(tile_contract.get("id", "TIL-UNKNOWN")),
+            "adjacency": adjacency,
+            "seed": int(seed),
+            "derived_seed": derived_seed,
+            "attempt": attempt,
+            "width": width,
+            "height": height,
+            "tile_grid": tile_grid,
+            "grid": [
+                "".join("." if collapsed[(x, y)] in navigation_masks else "#" for x in range(width))
+                for y in range(height)
+            ],
+            "entrance": list(entrance),
+            "exit": list(exit_cell),
+            "safe_spawns": safe_spawns,
+            "required_rooms": placements,
+            "path_length": distances[exit_cell],
+            "valid": True,
+        }
+    raise WorkflowError(
+        f"Stage contradiction after {retry_limit} deterministic WFC attempts: {last_reason}"
+    )
 
 
 def benchmark_assets(
@@ -2108,6 +2560,7 @@ def benchmark_assets(
 ) -> dict[str, Any]:
     project = _project(root)
     style = _style_record("0" * 64)
+    benchmark_parts = _part_records(style)
     visual_recipe = _record(
         {
             "kind": "animation",
@@ -2132,7 +2585,12 @@ def benchmark_assets(
         "loop": False,
     }
     started = time.perf_counter()
-    sprite_hashes = [hashlib.sha256(_indexed_png(visual_recipe, style, seed)).digest() for seed in range(max(1, sprite_count))]
+    sprite_hashes = [
+        hashlib.sha256(
+            _indexed_png(visual_recipe, style, seed, benchmark_parts)
+        ).digest()
+        for seed in range(max(1, sprite_count))
+    ]
     sprite_seconds = time.perf_counter() - started
     started = time.perf_counter()
     sound_hashes = [
@@ -2144,7 +2602,7 @@ def benchmark_assets(
     sound_seconds = time.perf_counter() - started
     started = time.perf_counter()
     runtime_recipe = {**visual_recipe, "kind": "sprite"}
-    _indexed_png(runtime_recipe, style, 999)
+    _indexed_png(runtime_recipe, style, 999, benchmark_parts)
     runtime_ms = (time.perf_counter() - started) * 1000.0
     cache = {index: value for index, value in enumerate(sprite_hashes[:100])}
     started = time.perf_counter()
@@ -2155,16 +2613,113 @@ def benchmark_assets(
     started = time.perf_counter()
     _indexed_png(tile_recipe, style, 7)
     tile_seconds = time.perf_counter() - started
-    started = time.perf_counter()
-    _ = sprite_hashes + sound_hashes
-    cached_batch_seconds = time.perf_counter() - started
+    cached_count = max(1, sprite_count + sound_count)
+    rewritten_files = 0
+    with tempfile.TemporaryDirectory() as temporary:
+        benchmark_root = Path(temporary)
+        _write_json(
+            benchmark_root / "work" / "assets" / "styles" / "STY-0001.json",
+            style,
+        )
+        benchmark_part = benchmark_parts[0]
+        _write_json(
+            benchmark_root
+            / "work"
+            / "assets"
+            / "parts"
+            / f"{benchmark_part['id']}.json",
+            benchmark_part,
+        )
+        _write_json(
+            benchmark_root / "assets" / "asset-manifest.json",
+            {"schema_version": SCHEMA_VERSION, "revision": 0, "assets": []},
+        )
+        benchmark_specs: list[str] = []
+        tracked_paths: list[Path] = [benchmark_root / "assets" / "asset-manifest.json"]
+        for index in range(cached_count):
+            spec_id = f"ASP-{index + 1:04d}"
+            benchmark_specs.append(spec_id)
+            output = f"assets/generated/benchmark/cache-{index + 1:04d}.bin"
+            recipe = _record(
+                {
+                    "kind": "sprite",
+                    "asset_spec_id": spec_id,
+                    "seed": index,
+                    "source_part_ids": [benchmark_part["id"]],
+                    "parameters": {
+                        "grid_size": 16,
+                        "palette_id": style["id"],
+                        "palette": style["palette"],
+                        "style_fingerprint": _style_generation_fingerprint(style),
+                        "layers": [
+                            {
+                                "slot": benchmark_part["slot"],
+                                "part_id": benchmark_part["id"],
+                                "offset": [0, 0],
+                            }
+                        ],
+                        "layer_choices": {
+                            benchmark_part["slot"]: [benchmark_part["id"]]
+                        },
+                        "source_part_hashes": {
+                            benchmark_part["id"]: benchmark_part["input_fingerprint"]
+                        },
+                        "source_part_licenses": {
+                            benchmark_part["id"]: benchmark_part["license"]
+                        },
+                        "purpose": "cached path benchmark",
+                        "output_license": "CC0-1.0",
+                    },
+                    "outputs": [output],
+                    "compiler": "aigame.pixel-media-v1",
+                    "compiler_version": __version__,
+                },
+                record_id=f"RCP-{index + 1:04d}",
+                status="approved",
+            )
+            _write_json(
+                benchmark_root / "work" / "assets" / "recipes" / f"{recipe['id']}.json",
+                recipe,
+            )
+            payload = hashlib.sha256(f"cached:{index}".encode("ascii")).digest()
+            output_path = benchmark_root / _safe_relative(output)
+            _write_bytes_if_changed(output_path, payload)
+            receipt = _receipt_path(benchmark_root, recipe)
+            _write_json(
+                receipt,
+                {
+                    "schema_version": SCHEMA_VERSION,
+                    "recipe_id": recipe["id"],
+                    "recipe_fingerprint": recipe["input_fingerprint"],
+                    "outputs": {output: hashlib.sha256(payload).hexdigest()},
+                },
+            )
+            if index == 0:
+                tracked_paths.extend([output_path, receipt])
+        warm = _generate_selected(benchmark_root, benchmark_specs, jobs=1)
+        if warm["generated"] or warm["cached"] != cached_count:
+            raise WorkflowError("Cached benchmark fixture did not enter the cache fast path")
+        before = {path: path.stat().st_mtime_ns for path in tracked_paths}
+        started = time.perf_counter()
+        cached_result = _generate_selected(benchmark_root, benchmark_specs, jobs=1)
+        cached_batch_seconds = time.perf_counter() - started
+        after = {path: path.stat().st_mtime_ns for path in tracked_paths}
+        rewritten_files = sum(before[path] != after[path] for path in tracked_paths)
+        if cached_result["generated"] or cached_result["cached"] != cached_count:
+            rewritten_files += 1
     measurements = {
         "sprite_batch": {"count": sprite_count, "seconds": sprite_seconds, "limit": 10.0, "passed": sprite_seconds <= 10.0},
         "sound_batch": {"count": sound_count, "seconds": sound_seconds, "limit": 15.0, "passed": sound_seconds <= 15.0},
         "runtime_compose": {"milliseconds": runtime_ms, "limit": 50.0, "passed": runtime_ms <= 50.0},
         "cached_lookup": {"milliseconds": cached_lookup_ms, "limit": 1.0, "passed": cached_lookup_ms <= 1.0},
         "tile_atlas": {"seconds": tile_seconds, "limit": 1.0, "passed": tile_seconds <= 1.0},
-        "cached_batch": {"seconds": cached_batch_seconds, "limit": 1.0, "passed": cached_batch_seconds <= 1.0},
+        "cached_batch": {
+            "count": cached_count,
+            "seconds": cached_batch_seconds,
+            "limit": 1.0,
+            "rewritten_files": rewritten_files,
+            "passed": cached_batch_seconds <= 1.0 and rewritten_files == 0,
+        },
     }
     return {
         "schema_version": SCHEMA_VERSION,
