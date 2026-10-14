@@ -70,7 +70,7 @@ jobs:
           mkdir -p "$PROJECT_PATH/builds"
           godot-bin --headless --path "$PROJECT_PATH" --export-debug "Windows Desktop" builds/reference-game.exe
       - name: Upload build
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: windows-debug-${{ github.sha }}
           path: ${{ inputs.project-path }}/builds/
